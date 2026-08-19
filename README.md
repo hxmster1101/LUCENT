@@ -1,14 +1,14 @@
-LUCENT FINAL BUILD
+LUCENT FIX
 
-สำคัญ: ใช้ไฟล์ index.js นี้แทนตัวเดิมทั้งไฟล์ ห้ามเอาไปต่อกับ index.js เก่า
+สิ่งที่แก้ในเวอร์ชันนี้:
+- ตั้งค่ากาชาแล้วเพิ่มตั๋วกาชาเป็นสินค้าในร้านอัตโนมัติ ราคา 5 Coins/ใบ
+- เปลี่ยนชื่อตั๋ว/Emoji แล้วรายการตั๋วในร้านจะอัปเดตอัตโนมัติเมื่อรัน gacha_setup
+- เพิ่ม /storeadd เป็นคำสั่งเพิ่มสินค้าและรีเฟรชหน้าร้านทันที
+- /add_item ยังใช้ได้
+- เพิ่ม stock: -1 = ไม่จำกัด
+- สินค้าหมดจะถูกเอาออกจาก dropdown ซื้อ แต่ยังแสดงจำนวน 0 ในหน้าร้าน
+- ซื้อ Gacha Ticket แล้วเข้ากระเป๋าในชื่อเดียวกับที่ตั้งค่า
+- /gachaadd สำหรับเพิ่มรางวัลกาชา
 
-Railway Variables:
-TOKEN=โทเคนบอท
-CLIENT_ID=Application ID
-GUILD_ID=Server ID
-
-Start: npm start
-Node: 20+
-
-คำสั่งกาชามีทั้ง /gachareward และ /gachaadd เพื่อรองรับชื่อเดิม
-Build marker: LUCENT-FINAL-2026-08-19-01
+ใช้แทน index.js เดิม แล้ว Railway redeploy
+Environment: DISCORD_TOKEN และ GUILD_ID
