@@ -1,28 +1,14 @@
-# LUCENT Discord Bot
+LUCENT FIX
 
-ไฟล์พร้อมสำหรับ Railway โดยไม่ใช้ MongoDB
+สิ่งที่แก้ในเวอร์ชันนี้:
+- ตั้งค่ากาชาแล้วเพิ่มตั๋วกาชาเป็นสินค้าในร้านอัตโนมัติ ราคา 5 Coins/ใบ
+- เปลี่ยนชื่อตั๋ว/Emoji แล้วรายการตั๋วในร้านจะอัปเดตอัตโนมัติเมื่อรัน gacha_setup
+- เพิ่ม /storeadd เป็นคำสั่งเพิ่มสินค้าและรีเฟรชหน้าร้านทันที
+- /add_item ยังใช้ได้
+- เพิ่ม stock: -1 = ไม่จำกัด
+- สินค้าหมดจะถูกเอาออกจาก dropdown ซื้อ แต่ยังแสดงจำนวน 0 ในหน้าร้าน
+- ซื้อ Gacha Ticket แล้วเข้ากระเป๋าในชื่อเดียวกับที่ตั้งค่า
+- /gachaadd สำหรับเพิ่มรางวัลกาชา
 
-## Railway Variables
-- TOKEN = Discord Bot Token
-- CLIENT_ID = Application/Client ID
-- GUILD_ID = Server ID (แนะนำให้ใส่เพื่อให้ Slash Commands อัปเดตเร็ว)
-
-## ไฟล์
-- index.js
-- package.json
-- data.json (สร้างอัตโนมัติครั้งแรก)
-
-## คำสั่งหลัก
-/paymentsetting หรือ /pymentsetting
-/storeadd
-/gift
-/gachasetup
-/gachastart
-/gachareward
-/gacharemove
-/addgift
-/bagpack
-/setup
-
-## หมายเหตุ
-ระบบบันทึกข้อมูลลง data.json บน filesystem ของ Railway เท่านั้น หากต้องการเก็บข้อมูลถาวรข้ามการ redeploy/restart ควรผูก Railway Volume ในภายหลัง
+ใช้แทน index.js เดิม แล้ว Railway redeploy
+Environment: DISCORD_TOKEN และ GUILD_ID
