@@ -1,0 +1,38 @@
+{
+  "settings": {
+    "payment": {
+      "title": "💳 ระบบเติมเงิน LUCENT",
+      "description": "เลือกช่องทางชำระเงินด้านล่าง",
+      "topupChannelId": "",
+      "slipChannelId": "",
+      "banner": "",
+      "wallet": null,
+      "bank": null,
+      "qr": null
+    },
+    "store": {
+      "name": "🛒 LUCENT STORE",
+      "description": "ร้านค้าสำหรับ Coins และรางวัล",
+      "channelId": "",
+      "buyButton": "🛒 ซื้อสินค้า",
+      "giftButton": "🎁 แลกรางวัล",
+      "banner": ""
+    },
+    "gacha": {
+      "name": "🎰 LUCENT GACHA",
+      "description": "ตู้สำหรับสุ่มกาชา",
+      "channelId": "",
+      "banner": "",
+      "ticketEmoji": "🎟️",
+      "ticketName": "Gacha Ticket",
+      "rollButton": "🎰 สุ่มกาชา",
+      "loadingBanner": "",
+      "price": 5
+    }
+  },
+  "products": {},
+  "gifts": {},
+  "gachaRewards": {},
+  "users": {},
+  "pendingPayments": {}
+}
