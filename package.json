@@ -1,12 +1,15 @@
 {
-  "name": "discord-bot",
+  "name": "lucent-discord-bot",
   "version": "1.0.0",
-  "description": "Discord Bot with Payment, Store, and Gacha systems",
+  "description": "LUCENT Discord Store, Topup, Gacha and Inventory Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
-    "discord.js": "^14.14.1"
+    "discord.js": "^14.25.1"
   }
 }
