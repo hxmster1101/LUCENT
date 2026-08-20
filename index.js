@@ -1,653 +1,130 @@
+// ============================================================
+// LUCENT DISCORD BOT - ALL IN ONE
+// Node.js + discord.js v14
+// Railway: node index.js
+// ============================================================
+
 const {
-  Client, GatewayIntentBits, Partials, REST, Routes,
-  SlashCommandBuilder, PermissionFlagsBits, ChannelType,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
-  ModalBuilder, TextInputBuilder, TextInputStyle,
-  EmbedBuilder
-} = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+  Client,
+  GatewayIntentBits,
+  Partials,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
+} = require("discord.js");
 
-const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
+const fs = require("fs");
+const path = require("path");
+
+// ============================================================
+// CONFIG
+// ============================================================
+
+const TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.GUILD_ID;
-const COIN_RATE = 0.86;
-const PREFIX = '!';
-const DATA_DIR = path.join(__dirname, 'data');
 
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!TOKEN) {
+  console.error("❌ ไม่พบ DISCORD_TOKEN ใน Railway Variables");
+  process.exit(1);
 }
 
-const DEFAULTS = {
-  config: {
-    payment: {
-      title: '💳 ระบบเติมเงิน LUCENT',
-      description: 'เลือกช่องทางชำระเงินด้านล่าง',
-      topupChannelId: '',
-      slipChannelId: '',
-      reviewChannelId: '',
-      banner: '',
-      methods: {
-        truemoney: {
-          enabled: false,
-          accountName: '',
-          accountNumber: ''
-        },
-        bank: {
-          enabled: false,
-          bankName: '',
-          accountName: '',
-          accountNumber: ''
-        },
-        qr: {
-          enabled: false,
-          imageUrl: ''
-        }
-      }
-    },
+// ============================================================
+// DATABASE
+// ============================================================
 
-    store: {
-      name: '🛒 LUCENT STORE',
-      description: 'ร้านค้า Coins',
-      channelId: '',
-      buyButton: '🛒 ซื้อสินค้า',
-      giftButton: '🎁 แลกรางวัล',
-      banner: '',
-      messageId: ''
-    }
+const DB_FILE = path.join(__dirname, "lucent-data.json");
+
+const defaultDB = {
+  payment: {
+    title: "💳 LUCENT TOPUP",
+    description: "ระบบเติมเงิน",
+    topupChannelId: "",
+    slipChannelId: "",
+    reviewChannelId: "",
+    banner: "",
+    methods: []
   },
-
-  users: {},
 
   store: {
-    products: {}
+    name: "🛒 LUCENT STORE",
+    description: "ร้านค้า LUCENT",
+    channelId: "",
+    buyLabel: "🛒 ซื้อสินค้า",
+    giftLabel: "🎁 แลกรางวัล",
+    banner: ""
   },
 
-  gifts: {
-    items: {}
-  },
+  items: [],
+  gifts: [],
 
   gacha: {
-    name: 'LUCENT GACHA',
-    description: 'ตู้สำหรับสุ่มกาชา',
-    channelId: '',
-    banner: '',
-    ticketEmoji: '🎟️',
-    ticketName: 'Gacha Ticket',
-    spinButton: '🎰 สุ่มกาชา',
-    loadingBanner: '',
-    messageId: '',
-    rewards: []
-  }
+    name: "🎰 LUCENT GACHA",
+    description: "ตู้สุ่มกาชา",
+    channelId: "",
+    banner: "",
+    ticketEmoji: "🎟️",
+    ticketName: "Gacha Ticket",
+    buttonLabel: "🎰 สุ่มกาชา",
+    loadingBanner: "",
+    ticketPrice: 5
+  },
+
+  gachaRewards: [],
+
+  users: {}
 };
 
-const FILES = {
-  config: 'config.json',
-  users: 'users.json',
-  store: 'store.json',
-  gifts: 'gifts.json',
-  gacha: 'gacha.json'
-};
-
-function load(key) {
-  const file = path.join(DATA_DIR, FILES[key]);
-
-  if (!fs.existsSync(file)) {
-    fs.writeFileSync(
-      file,
-      JSON.stringify(DEFAULTS[key], null, 2),
-      'utf8'
-    );
-
-    return structuredClone(DEFAULTS[key]);
-  }
-
+function loadDB() {
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return structuredClone(DEFAULTS[key]);
-  }
-}
-
-function save(key, obj) {
-  fs.writeFileSync(
-    path.join(DATA_DIR, FILES[key]),
-    JSON.stringify(obj, null, 2),
-    'utf8'
-  );
-}
-
-let config = load('config');
-let users = load('users');
-let store = load('store');
-let gifts = load('gifts');
-let gacha = load('gacha');
-
-function user(id) {
-  if (!users[id]) {
-    users[id] = {
-      coins: 0,
-      salt: 0,
-      tickets: 0,
-      inventory: {},
-      purchases: 0
-    };
-  }
-
-  return users[id];
-}
-
-function addItem(id, name, qty = 1) {
-  const u = user(id);
-
-  u.inventory[name] = (u.inventory[name] || 0) + qty;
-}
-
-function cleanId(v) {
-  return String(v || '')
-    .replace(/[<#@&>]/g, '')
-    .trim();
-}
-
-function money(n) {
-  return Number(n).toFixed(2);
-}
-
-function validUrl(v) {
-  return !v || /^https?:\/\/\S+$/i.test(v);
-}
-
-function admin(i) {
-  return Boolean(
-    i.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
-    i.member?.permissions?.has(PermissionFlagsBits.Administrator)
-  );
-}
-
-function roleByName(guild, name) {
-  return guild.roles.cache.find(r => r.name === name);
-}
-
-function paymentMethods() {
-  const m = config.payment.methods;
-  const o = [];
-
-  if (m.truemoney.enabled) {
-    o.push({
-      id: 'tm',
-      label: 'TrueMoney Wallet',
-      emoji: '💚'
-    });
-  }
-
-  if (m.bank.enabled) {
-    o.push({
-      id: 'bank',
-      label: 'บัญชีธนาคาร',
-      emoji: '🏦'
-    });
-  }
-
-  if (m.qr.enabled) {
-    o.push({
-      id: 'qr',
-      label: 'QR Code',
-      emoji: '📱'
-    });
-  }
-
-  return o;
-}
-
-function coinOptions() {
-  return [
-    '10 Coins = 8.60 บาท',
-    '50 Coins = 43.00 บาท',
-    '115 Coins = 98.90 บาท',
-    '510 Coins = 438.60 บาท',
-    '1,150 Coins = 989.00 บาท'
-  ].join('\n');
-}
-
-function paymentPanel() {
-  const methods = paymentMethods();
-
-  const e = new EmbedBuilder()
-    .setColor(0x57F287)
-    .setTitle(
-      config.payment.title ||
-      '💳 ระบบเติมเงิน'
-    )
-    .setDescription(
-      `${config.payment.description || ''}
-
-**เรทราคา Coins**
-${coinOptions()}
-
-หรือกด **กำหนดเอง** เพื่อกำหนดจำนวน Coins เอง
-ขั้นต่ำ **1 บาท**
-
-หลังชำระเงิน ให้แนบสลิปใน <#${config.payment.slipChannelId}>`
-    );
-
-  if (
-    config.payment.banner &&
-    validUrl(config.payment.banner)
-  ) {
-    e.setImage(config.payment.banner);
-  }
-
-  const menu =
-    new StringSelectMenuBuilder()
-      .setCustomId('pay_method')
-      .setPlaceholder('💳 เลือกช่องทางชำระเงิน')
-      .addOptions(
-        methods.length
-          ? methods.map(x => ({
-              label: x.label,
-              value: x.id,
-              emoji: x.emoji
-            }))
-          : [{
-              label: 'ยังไม่มีช่องทางชำระเงิน',
-              value: 'none'
-            }]
-      );
-
-  return {
-    embeds: [e],
-
-    components: [
-      new ActionRowBuilder()
-        .addComponents(menu),
-
-      new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder()
-            .setCustomId('topup_custom')
-            .setLabel('กำหนดเอง')
-            .setStyle(ButtonStyle.Primary)
-        )
-    ]
-  };
-}
-
-function paymentEmbed(id) {
-  const m = config.payment.methods;
-
-  const e = new EmbedBuilder()
-    .setColor(0x5865F2)
-    .setTitle('💳 ช่องทางชำระเงิน');
-
-  if (id === 'tm') {
-    e.setDescription(
-      `**TrueMoney Wallet**
-
-ชื่อบัญชี: ${m.truemoney.accountName}
-เลขบัญชี: \`${m.truemoney.accountNumber}\`
-
-ชำระแล้วแนบสลิปที่ <#${config.payment.slipChannelId}>`
-    );
-  }
-
-  if (id === 'bank') {
-    e.setDescription(
-      `**${m.bank.bankName}**
-
-ชื่อบัญชี: ${m.bank.accountName}
-เลขบัญชี: \`${m.bank.accountNumber}\`
-
-ชำระแล้วแนบสลิปที่ <#${config.payment.slipChannelId}>`
-    );
-  }
-
-  if (id === 'qr') {
-    e.setDescription(
-      `**QR Code ชำระเงิน**
-
-ชำระแล้วแนบสลิปที่ <#${config.payment.slipChannelId}>`
-    );
-
-    if (m.qr.imageUrl) {
-      e.setImage(m.qr.imageUrl);
+    if (!fs.existsSync(DB_FILE)) {
+      return JSON.parse(JSON.stringify(defaultDB));
     }
-  }
 
-  return e;
-}
+    const data = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
 
-function storeEmbed() {
-  const products = Object.values(store.products);
-  const giftsList = Object.values(gifts.items);
-
-  const buy = products.length
-    ? products.map(p =>
-        `**${p.name}**
-${p.description || '-'}
-💰 ${p.price} Coins | 📦 เหลือ ${
-          p.stock === -1 ? 'ไม่จำกัด' : p.stock
-        }`
-      ).join('\n\n')
-    : 'ยังไม่มีสินค้า';
-
-  const gift = giftsList.length
-    ? giftsList.map(g =>
-        `**${g.name}**
-🧂 ${g.cost} เกลือ | 📦 เหลือ ${
-          g.stock === -1 ? 'ไม่จำกัด' : g.stock
-        } | ${g.type}`
-      ).join('\n\n')
-    : 'ยังไม่มีรางวัลแลก';
-
-  const e = new EmbedBuilder()
-    .setColor(0x5865F2)
-    .setTitle(config.store.name)
-    .setDescription(config.store.description || '')
-    .addFields(
-      {
-        name: '🛍️ สินค้าที่สามารถซื้อได้',
-        value: buy.slice(0, 1024)
+    return {
+      ...JSON.parse(JSON.stringify(defaultDB)),
+      ...data,
+      payment: {
+        ...defaultDB.payment,
+        ...(data.payment || {})
       },
-      {
-        name: '🎁 สินค้าที่สามารถแลกได้',
-        value: gift.slice(0, 1024)
+      store: {
+        ...defaultDB.store,
+        ...(data.store || {})
+      },
+      gacha: {
+        ...defaultDB.gacha,
+        ...(data.gacha || {})
       }
-    );
-
-  if (
-    config.store.banner &&
-    validUrl(config.store.banner)
-  ) {
-    e.setImage(config.store.banner);
-  }
-
-  return e;
-}
-
-function storeComponents() {
-  const available =
-    Object.values(store.products)
-      .filter(
-        p => p.stock === -1 || p.stock > 0
-      )
-      .slice(0, 25);
-
-  const menu =
-    new StringSelectMenuBuilder()
-      .setCustomId('store_buy')
-      .setPlaceholder('🛒 เลือกสินค้าที่ต้องการซื้อ')
-      .addOptions(
-        available.length
-          ? available.map(p => ({
-              label: p.name.slice(0, 100),
-              description:
-                `${p.price} Coins | เหลือ ${
-                  p.stock === -1
-                    ? 'ไม่จำกัด'
-                    : p.stock
-                }`.slice(0, 100),
-              value: p.id
-            }))
-          : [{
-              label: 'ไม่มีสินค้าที่พร้อมขาย',
-              value: 'none'
-            }]
-      );
-
-  return {
-    components: [
-      new ActionRowBuilder()
-        .addComponents(menu),
-
-      new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder()
-            .setCustomId('gift_open')
-            .setLabel(
-              config.store.giftButton ||
-              '🎁 แลกรางวัล'
-            )
-            .setStyle(ButtonStyle.Success)
-        )
-    ]
-  };
-}
-
-async function refreshStore(guild) {
-  if (!config.store.channelId) return;
-
-  const ch = await guild.channels
-    .fetch(config.store.channelId)
-    .catch(() => null);
-
-  if (!ch || !ch.isTextBased()) return;
-
-  let msg = config.store.messageId
-    ? await ch.messages
-        .fetch(config.store.messageId)
-        .catch(() => null)
-    : null;
-
-  if (msg) {
-    await msg.edit({
-      embeds: [storeEmbed()],
-      ...storeComponents()
-    });
-  } else {
-    msg = await ch.send({
-      embeds: [storeEmbed()],
-      ...storeComponents()
-    });
-
-    config.store.messageId = msg.id;
-
-    save('config', config);
+    };
+  } catch (error) {
+    console.error("❌ DB Error:", error);
+    return JSON.parse(JSON.stringify(defaultDB));
   }
 }
 
-function gachaChance(r) {
-  const active = gacha.rewards.filter(
-    x => x.unlimited === 1 || x.quantity > 0
-  );
+let db = loadDB();
 
-  const total = active.reduce(
-    (s, x) =>
-      s + Math.max(0, Number(x.chance) || 0),
-    0
-  );
-
-  return total
-    ? ((Number(r.chance) || 0) / total) * 100
-    : 0;
-}
-
-function gachaEmbed() {
-  const roles =
-    gacha.rewards.filter(
-      r => r.type === 'ROLE'
-    );
-
-  const items =
-    gacha.rewards.filter(
-      r => r.type === 'ITEM'
-    );
-
-  const fmt = a =>
-    a.length
-      ? a.map(r =>
-          `${r.type === 'ROLE' ? '🏷️' : '🎁'} **${r.name}** เหลือ ${
-            r.unlimited === 1
-              ? 'ไม่จำกัด'
-              : r.quantity
-          } รางวัล | โอกาสออก ${gachaChance(r).toFixed(2)}%`
-        ).join('\n')
-      : 'ไม่มีรางวัล';
-
-  const e = new EmbedBuilder()
-    .setColor(0x9B59B6)
-    .setTitle(gacha.name)
-    .setDescription(
-      `${gacha.description || ''}
-
-**ROLE**
-${fmt(roles)}
-
-**ITEM**
-${fmt(items)}
-
-${gacha.ticketEmoji} 1 ตั๋ว = **5 Coins**`
-    );
-
-  if (
-    gacha.banner &&
-    validUrl(gacha.banner)
-  ) {
-    e.setImage(gacha.banner);
-  }
-
-  return e;
-}
-
-function gachaComponents() {
-  return {
-    components: [
-      new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder()
-            .setCustomId('gacha_spin')
-            .setLabel(
-              gacha.spinButton ||
-              '🎰 สุ่มกาชา'
-            )
-            .setStyle(ButtonStyle.Primary)
-        )
-    ]
-  };
-}
-
-function pickReward() {
-  const active =
-    gacha.rewards.filter(
-      r => r.unlimited === 1 || r.quantity > 0
-    );
-
-  if (!active.length) return null;
-
-  const total = active.reduce(
-    (s, r) =>
-      s + Math.max(0, Number(r.chance) || 0),
-    0
-  );
-
-  let n = Math.random() * total;
-
-  for (const r of active) {
-    n -= Math.max(
-      0,
-      Number(r.chance) || 0
-    );
-
-    if (n <= 0) return r;
-  }
-
-  return active[active.length - 1];
-}
-async function register() {
-  if (!TOKEN || !CLIENT_ID) {
-    throw new Error(
-      'ต้องตั้ง DISCORD_TOKEN/TOKEN และ CLIENT_ID ใน Railway'
-    );
-  }
-
-  const cmds = [
-    new SlashCommandBuilder()
-      .setName('pymentsetting')
-      .setDescription('ตั้งค่าระบบเติมเงิน')
-      .setDefaultMemberPermissions(
-        PermissionFlagsBits.Administrator
-      ),
-
-    new SlashCommandBuilder()
-      .setName('startstore')
-      .setDescription(
-        'สร้าง/รีเฟรชหน้าระบบเติมเงิน'
-      ),
-
-    new SlashCommandBuilder()
-      .setName('storeadd')
-      .setDescription(
-        'เพิ่มสินค้า ROLE/ITEM'
-      )
-      .setDefaultMemberPermissions(
-        PermissionFlagsBits.Administrator
-      ),
-
-    new SlashCommandBuilder()
-      .setName('gift')
-      .setDescription(
-        'ตั้งชื่อปุ่มแลกรางวัล'
-      )
-      .setDefaultMemberPermissions(
-        PermissionFlagsBits.Administrator
-      ),
-
-    new SlashCommandBuilder()
-      .setName('gachasetup')
-      .setDescription(
-        'ตั้งค่าตู้กาชา 8 ช่อง'
-      )
-      .setDefaultMemberPermissions(
-        PermissionFlagsBits.Administrator
-      ),
-
-    new SlashCommandBuilder()
-      .setName('gachastart')
-      .setDescription(
-        'สร้างหน้าตู้กาชา'
-      )
-      .setDefaultMemberPermissions(
-        PermissionFlagsBits.Administrator
-      ),
-
-    new SlashCommandBuilder()
-      .setName('gachareward')
-      .setDescription(
-        'เพิ่ม/ลบรางวัลกาชา'
-      )
-      .setDefaultMemberPermissions(
-        PermissionFlagsBits.Administrator
-      ),
-
-    new SlashCommandBuilder()
-      .setName('balance')
-      .setDescription(
-        'ดู Coins ของตัวเอง'
-      )
-  ].map(x => x.toJSON());
-
-  const rest =
-    new REST({ version: '10' })
-      .setToken(TOKEN);
-
-  if (GUILD_ID) {
-    await rest.put(
-      Routes.applicationGuildCommands(
-        CLIENT_ID,
-        GUILD_ID
-      ),
-      { body: cmds }
-    );
-  } else {
-    await rest.put(
-      Routes.applicationCommands(
-        CLIENT_ID
-      ),
-      { body: cmds }
-    );
+function saveDB() {
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+  } catch (error) {
+    console.error("❌ Save DB Error:", error);
   }
 }
+
+// ============================================================
+// CLIENT
+// ============================================================
 
 const client = new Client({
   intents: [
@@ -657,1866 +134,2497 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
   ],
-
-  partials: [
-    Partials.Channel
-  ]
+  partials: [Partials.Channel]
 });
 
-client.once('ready', async () => {
-  console.log(
-    `ONLINE: ${client.user.tag}`
+// ============================================================
+// HELPERS
+// ============================================================
+
+function isAdmin(interaction) {
+  return interaction.memberPermissions?.has(
+    PermissionFlagsBits.Administrator
   );
+}
 
-  try {
-    await register();
-    console.log('Slash commands registered.');
-  } catch (e) {
-    console.error(
-      'Register commands failed:',
-      e
-    );
+function getUser(userId) {
+  if (!db.users[userId]) {
+    db.users[userId] = {
+      coins: 0,
+      salt: 0,
+      inventory: {},
+      pendingTopup: null
+    };
   }
-});
 
-function modalField(
+  return db.users[userId];
+}
+
+function addItem(userId, name, amount = 1) {
+  const user = getUser(userId);
+
+  if (!user.inventory[name]) {
+    user.inventory[name] = 0;
+  }
+
+  user.inventory[name] += amount;
+}
+
+function money(amount) {
+  return Number(amount).toFixed(2);
+}
+
+function getTopupPrice(coins) {
+  const rates = {
+    10: 8.6,
+    50: 43,
+    115: 98.9,
+    510: 438.6,
+    1150: 989
+  };
+
+  if (rates[coins] !== undefined) {
+    return rates[coins];
+  }
+
+  return Number((coins * 0.86).toFixed(2));
+}
+
+function getChannel(guild, id) {
+  if (!id) return null;
+  return guild.channels.cache.get(id);
+}
+
+function validImage(url) {
+  return typeof url === "string" &&
+    /^https?:\/\//i.test(url);
+}
+
+function truncate(text, max = 100) {
+  text = String(text || "");
+
+  if (text.length <= max) {
+    return text;
+  }
+
+  return text.substring(0, max - 1) + "…";
+}
+
+async function sendDM(user, content) {
+  try {
+    await user.send(content);
+  } catch {
+    // ปิด DM ก็ไม่ทำให้บอทพัง
+  }
+}
+
+// ============================================================
+// MODAL
+// ============================================================
+
+function makeField(
   id,
   label,
   style = TextInputStyle.Short,
   required = true,
-  placeholder = ''
+  placeholder = ""
 ) {
-  return new TextInputBuilder()
+  return {
+    id,
+    label,
+    style,
+    required,
+    placeholder
+  };
+}
+
+function makeModal(id, title, fields) {
+  const modal = new ModalBuilder()
     .setCustomId(id)
-    .setLabel(label)
-    .setStyle(style)
-    .setRequired(required)
-    .setPlaceholder(placeholder);
+    .setTitle(title);
+
+  for (const f of fields) {
+    const input = new TextInputBuilder()
+      .setCustomId(f.id)
+      .setLabel(f.label)
+      .setStyle(f.style || TextInputStyle.Short)
+      .setRequired(f.required !== false);
+
+    if (f.placeholder) {
+      input.setPlaceholder(f.placeholder);
+    }
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(input)
+    );
+  }
+
+  return modal;
 }
 
-function showPaymentSetup1(i) {
-  const modal =
-    new ModalBuilder()
-      .setCustomId('pay_setup1')
-      .setTitle(
-        'ตั้งค่าระบบเติมเงิน 1/2'
-      );
+// ============================================================
+// PAYMENT UI
+// ============================================================
 
-  modal.addComponents(
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'title',
-          'หัวข้อการชำระเงิน',
-          TextInputStyle.Short,
-          true
-        )
-      ),
+function paymentEmbed() {
+  const embed = new EmbedBuilder()
+    .setTitle(db.payment.title)
+    .setDescription(db.payment.description || "")
+    .setColor(0x8e44ad);
 
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'desc',
-          'รายละเอียด',
-          TextInputStyle.Paragraph,
-          true
-        )
-      ),
+  if (validImage(db.payment.banner)) {
+    embed.setImage(db.payment.banner);
+  }
 
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'topup',
-          'ID ห้องเติมเงิน',
-          TextInputStyle.Short,
-          true
-        )
-      ),
+  if (!db.payment.methods.length) {
+    embed.addFields({
+      name: "💳 ช่องทางชำระเงิน",
+      value: "ยังไม่ได้ตั้งค่าช่องทางชำระเงิน"
+    });
+  } else {
+    embed.addFields({
+      name: "💳 ช่องทางชำระเงิน",
+      value: db.payment.methods
+        .map((m, i) => `${i + 1}. ${m.type}`)
+        .join("\n")
+    });
+  }
 
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'slip',
-          'ID ห้องแนบสลิป',
-          TextInputStyle.Short,
-          true
-        )
-      ),
+  return embed;
+}
 
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'review',
-          'ID ห้องตรวจสอบการเงิน',
-          TextInputStyle.Short,
-          true
-        )
+function paymentButton() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("topup_open")
+      .setLabel("💰 เติมเงิน")
+      .setStyle(ButtonStyle.Success)
+  );
+}
+
+function paymentMethodMenu() {
+  const methods = db.payment.methods || [];
+
+  const options = methods
+    .slice(0, 25)
+    .map((method, index) => {
+      return new StringSelectMenuOptionBuilder()
+        .setLabel(truncate(method.type))
+        .setValue(String(index))
+        .setDescription(
+          truncate(method.details || method.type)
+        );
+    });
+
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("topup_method")
+      .setPlaceholder("เลือกช่องทางชำระเงิน")
+      .addOptions(options)
+  );
+}
+
+function amountMenu() {
+  const rates = [
+    [10, 8.6],
+    [50, 43],
+    [115, 98.9],
+    [510, 438.6],
+    [1150, 989]
+  ];
+
+  const options = rates.map(([coins, baht]) => {
+    return new StringSelectMenuOptionBuilder()
+      .setLabel(
+        `${coins.toLocaleString()} Coins = ${baht.toFixed(2)} บาท`
       )
+      .setValue(String(coins));
+  });
+
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("topup_amount")
+      .setPlaceholder("เลือกจำนวน Coins")
+      .addOptions(options)
+  );
+}
+
+// ============================================================
+// STORE UI
+// ============================================================
+
+function storeEmbed() {
+  const embed = new EmbedBuilder()
+    .setTitle(db.store.name)
+    .setDescription(db.store.description || "")
+    .setColor(0x3498db);
+
+  if (validImage(db.store.banner)) {
+    embed.setImage(db.store.banner);
+  }
+
+  const products =
+    db.items
+      .map(item => {
+        return (
+          `**${item.name}**\n` +
+          `💰 ราคา: ${item.price.toLocaleString()} Coins\n` +
+          `📦 เหลือ: ${
+            item.stock < 0 ? "ไม่จำกัด" : item.stock
+          }`
+        );
+      })
+      .join("\n\n") || "ยังไม่มีสินค้า";
+
+  const gifts =
+    db.gifts
+      .map(gift => {
+        return (
+          `🎁 **${gift.name}**\n` +
+          `🧂 ใช้ ${gift.costSalt.toLocaleString()} เกลือ\n` +
+          `📦 เหลือ: ${
+            gift.stock < 0 ? "ไม่จำกัด" : gift.stock
+          }`
+        );
+      })
+      .join("\n\n") || "ยังไม่มีรางวัล";
+
+  embed.addFields(
+    {
+      name: "🛒 สินค้าที่สามารถซื้อได้",
+      value: products.substring(0, 1024)
+    },
+    {
+      name: "🎁 สินค้าที่สามารถแลกได้",
+      value: gifts.substring(0, 1024)
+    }
   );
 
-  return i.showModal(modal);
+  return embed;
 }
 
-function showPaymentSetup2(i) {
-  const modal =
-    new ModalBuilder()
-      .setCustomId('pay_setup2')
-      .setTitle(
-        'ตั้งค่าระบบเติมเงิน 2/2'
-      );
+function storeComponents() {
+  const rows = [];
 
-  modal.addComponents(
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'banner',
-          'ลิงค์ Banner',
-          TextInputStyle.Short,
-          false
-        )
-      ),
+  const available = db.items
+    .filter(item => item.stock !== 0)
+    .slice(0, 25);
 
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'tm',
-          'TrueMoney: ชื่อบัญชี|เลขบัญชี',
-          TextInputStyle.Short,
-          false,
-          'ชื่อบัญชี | เลขบัญชี'
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'bank',
-          'ธนาคาร: ธนาคาร|ชื่อบัญชี|เลขบัญชี',
-          TextInputStyle.Short,
-          false,
-          'ธนาคาร | ชื่อบัญชี | เลขบัญชี'
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'qr',
-          'ลิงค์รูป QR Code',
-          TextInputStyle.Short,
-          false
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'enabled',
-          'ช่องทางที่เปิดใช้',
-          TextInputStyle.Short,
-          false,
-          'TM,BANK,QR'
-        )
+  if (available.length) {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId("store_buy")
+          .setPlaceholder(
+            db.store.buyLabel || "🛒 ซื้อสินค้า"
+          )
+          .addOptions(
+            available.map(item =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(truncate(item.name))
+                .setValue(item.id)
+                .setDescription(
+                  `${item.price} Coins | เหลือ ${
+                    item.stock < 0
+                      ? "ไม่จำกัด"
+                      : item.stock
+                  }`
+                )
+            )
+          )
       )
+    );
+  }
+
+  rows.push(
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("store_gift")
+        .setLabel(
+          db.store.giftLabel || "🎁 แลกรางวัล"
+        )
+        .setStyle(ButtonStyle.Success)
+    )
   );
 
-  return i.showModal(modal);
+  return rows;
 }
 
-function showStoreAdd(i) {
-  const modal =
-    new ModalBuilder()
-      .setCustomId('store_add')
-      .setTitle(
-        'เพิ่มสินค้าเข้าร้าน'
-      );
+// ============================================================
+// GACHA UI
+// ============================================================
 
-  modal.addComponents(
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'name',
-          'ชื่อ ITEM หรือ ยศ'
-        )
-      ),
+function gachaEmbed() {
+  const embed = new EmbedBuilder()
+    .setTitle(db.gacha.name)
+    .setDescription(db.gacha.description || "")
+    .setColor(0x9b59b6);
 
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'desc',
-          'รายละเอียดสินค้า',
-          TextInputStyle.Paragraph
-        )
-      ),
+  if (validImage(db.gacha.banner)) {
+    embed.setImage(db.gacha.banner);
+  }
 
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'type',
-          'ประเภทสินค้า ROLE หรือ ITEM',
-          TextInputStyle.Short,
-          true,
-          'ROLE หรือ ITEM'
-        )
-      ),
+  if (!db.gachaRewards.length) {
+    embed.addFields({
+      name: "🎁 รางวัลในตู้",
+      value: "ยังไม่มีรางวัล"
+    });
+  } else {
+    const totalWeight =
+      db.gachaRewards.reduce(
+        (sum, reward) =>
+          sum + Number(reward.weight || 0),
+        0
+      ) || 1;
 
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'price',
-          'ราคาสินค้า Coins'
-        )
-      ),
+    const roles =
+      db.gachaRewards
+        .filter(r => r.type === "ROLE")
+        .map(r => {
+          const chance =
+            (Number(r.weight) / totalWeight) * 100;
 
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'stock',
-          'จำนวนสินค้า',
-          TextInputStyle.Short,
-          true,
-          'ใช้ -1 = ไม่จำกัด'
-        )
+          return (
+            `👑 ${r.name} — ` +
+            `เหลือ ${
+              r.stock < 0
+                ? "ไม่จำกัด"
+                : r.stock
+            } — ` +
+            `โอกาส ${chance.toFixed(2)}%`
+          );
+        })
+        .join("\n") || "ไม่มี";
+
+    const items =
+      db.gachaRewards
+        .filter(r => r.type === "ITEM")
+        .map(r => {
+          const chance =
+            (Number(r.weight) / totalWeight) * 100;
+
+          return (
+            `📦 ${r.name} — ` +
+            `เหลือ ${
+              r.stock < 0
+                ? "ไม่จำกัด"
+                : r.stock
+            } — ` +
+            `โอกาส ${chance.toFixed(2)}%`
+          );
+        })
+        .join("\n") || "ไม่มี";
+
+    embed.addFields(
+      {
+        name: "👑 ประเภทยศ",
+        value: roles.substring(0, 1024)
+      },
+      {
+        name: "📦 ประเภทไอเท็ม",
+        value: items.substring(0, 1024)
+      }
+    );
+  }
+
+  embed.setFooter({
+    text:
+      `${db.gacha.ticketEmoji} ${db.gacha.ticketName} ` +
+      `| 1 ตั๋ว = ${db.gacha.ticketPrice} Coins`
+  });
+
+  return embed;
+}
+
+function gachaButton() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("gacha_roll")
+      .setLabel(
+        db.gacha.buttonLabel || "🎰 สุ่มกาชา"
       )
+      .setStyle(ButtonStyle.Primary)
+  );
+}
+
+// ============================================================
+// REFRESH STORE
+// ============================================================
+
+async function refreshStore(guild) {
+  if (!db.store.channelId) return;
+
+  const channel = getChannel(
+    guild,
+    db.store.channelId
   );
 
-  return i.showModal(modal);
-}
-
-function showGiftSetup(i) {
-  const modal =
-    new ModalBuilder()
-      .setCustomId('gift_setup')
-      .setTitle(
-        'ตั้งค่าปุ่มแลกรางวัล'
-      );
-
-  modal.addComponents(
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'name',
-          'ชื่อปุ่มแลกรางวัล'
-        )
-      )
-  );
-
-  return i.showModal(modal);
-}
-
-function showGachaSetup1(i) {
-  const modal =
-    new ModalBuilder()
-      .setCustomId('gacha_setup1')
-      .setTitle(
-        'ตั้งค่าตู้กาชา 1/2'
-      );
-
-  modal.addComponents(
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'name',
-          'ชื่อตู้กาชา'
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'desc',
-          'รายละเอียด',
-          TextInputStyle.Paragraph
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'channel',
-          'ID ช่องกาชา'
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'banner',
-          'ลิงค์ Banner',
-          TextInputStyle.Short,
-          false
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'loading',
-          'ลิงค์ Banner ตอนกำลังสุ่ม',
-          TextInputStyle.Short,
-          false
-        )
-      )
-  );
-
-  return i.showModal(modal);
-}
-
-function showGachaSetup2(i) {
-  const modal =
-    new ModalBuilder()
-      .setCustomId('gacha_setup2')
-      .setTitle(
-        'ตั้งค่าตู้กาชา 2/2'
-      );
-
-  modal.addComponents(
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'ticket_emoji',
-          'อิโมจิตั๋วกาชา'
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'ticket_name',
-          'ชื่อตั๋วกาชา'
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'spin',
-          'ชื่อปุ่มสุ่มกาชา'
-        )
-      )
-  );
-
-  return i.showModal(modal);
-}
-
-function showGachaReward(i) {
-  const modal =
-    new ModalBuilder()
-      .setCustomId('gadd_modal')
-      .setTitle(
-        'เพิ่มรางวัลกาชา'
-      );
-
-  modal.addComponents(
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'name',
-          'ชื่อรางวัล'
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'qty',
-          'จำนวน (-1 = ไม่จำกัด)'
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'chance',
-          'โอกาสพื้นฐาน'
-        )
-      ),
-
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'type',
-          'ประเภทรางวัล ROLE หรือ ITEM'
-        )
-      )
-  );
-
-  return i.showModal(modal);
-}
-
-function showCustomAmount(i) {
-  const modal =
-    new ModalBuilder()
-      .setCustomId('custom_amount')
-      .setTitle(
-        'กำหนดจำนวน Coins'
-      );
-
-  modal.addComponents(
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'coins',
-          'จำนวน Coins'
-        )
-      )
-  );
-
-  return i.showModal(modal);
-}
-
-function showQty(i, id) {
-  const modal =
-    new ModalBuilder()
-      .setCustomId(`qty:${id}`)
-      .setTitle(
-        'จำนวนสินค้าที่ต้องการซื้อ'
-      );
-
-  modal.addComponents(
-    new ActionRowBuilder()
-      .addComponents(
-        modalField(
-          'qty',
-          'จำนวน'
-        )
-      )
-  );
-
-  return i.showModal(modal);
-}
-
-async function updateGachaMessage(guild) {
-  if (
-    !gacha.channelId ||
-    !gacha.messageId
-  ) {
+  if (!channel || !channel.isTextBased()) {
     return;
   }
 
-  const ch = await guild.channels
-    .fetch(gacha.channelId)
-    .catch(() => null);
+  try {
+    const messages =
+      await channel.messages.fetch({
+        limit: 50
+      });
 
-  if (!ch) return;
+    const oldMessage = messages.find(
+      message =>
+        message.author.id === client.user.id &&
+        message.components.some(row =>
+          row.components.some(
+            component =>
+              component.customId === "store_buy" ||
+              component.customId === "store_gift"
+          )
+        )
+    );
 
-  const msg = await ch.messages
-    .fetch(gacha.messageId)
-    .catch(() => null);
-
-  if (msg) {
-    await msg.edit({
-      embeds: [gachaEmbed()],
-      ...gachaComponents()
-    }).catch(() => {});
+    if (oldMessage) {
+      await oldMessage.edit({
+        embeds: [storeEmbed()],
+        components: storeComponents()
+      });
+    } else {
+      await channel.send({
+        embeds: [storeEmbed()],
+        components: storeComponents()
+      });
+    }
+  } catch (error) {
+    console.error(
+      "❌ refreshStore:",
+      error.message
+    );
   }
 }
+
+// ============================================================
+// GACHA TICKET
+// ============================================================
+
+function ensureGachaTicket() {
+  const ticketName =
+    db.gacha.ticketName || "Gacha Ticket";
+
+  let item =
+    db.items.find(
+      x => x.gachaTicket === true
+    );
+
+  if (!item) {
+    item = {
+      id: "gacha-ticket",
+      name: ticketName,
+      description:
+        "ตั๋วสำหรับสุ่มกาชา",
+      type: "ITEM",
+      price: db.gacha.ticketPrice || 5,
+      stock: -1,
+      gachaTicket: true
+    };
+
+    db.items.push(item);
+  } else {
+    item.name = ticketName;
+    item.price =
+      db.gacha.ticketPrice || 5;
+    item.stock = -1;
+    item.type = "ITEM";
+    item.gachaTicket = true;
+  }
+
+  return item;
+}
+
+// ============================================================
+// REFRESH GACHA
+// ============================================================
+
+async function refreshGacha(guild) {
+  if (!db.gacha.channelId) return;
+
+  const channel = getChannel(
+    guild,
+    db.gacha.channelId
+  );
+
+  if (!channel || !channel.isTextBased()) {
+    return;
+  }
+
+  try {
+    const messages =
+      await channel.messages.fetch({
+        limit: 50
+      });
+
+    const oldMessage = messages.find(
+      message =>
+        message.author.id === client.user.id &&
+        message.components.some(row =>
+          row.components.some(
+            component =>
+              component.customId === "gacha_roll"
+          )
+        )
+    );
+
+    if (oldMessage) {
+      await oldMessage.edit({
+        embeds: [gachaEmbed()],
+        components: [gachaButton()]
+      });
+    } else {
+      await channel.send({
+        embeds: [gachaEmbed()],
+        components: [gachaButton()]
+      });
+    }
+  } catch (error) {
+    console.error(
+      "❌ refreshGacha:",
+      error.message
+    );
+  }
+}
+
+// ============================================================
+// SLASH COMMANDS
+// ============================================================
+
+const commands = [
+
+  new SlashCommandBuilder()
+    .setName("pymentsetting")
+    .setDescription("ตั้งค่าระบบเติมเงิน")
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.Administrator
+    ),
+
+  new SlashCommandBuilder()
+    .setName("startstore")
+    .setDescription("ส่งหน้าระบบเติมเงิน")
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.Administrator
+    ),
+
+  new SlashCommandBuilder()
+    .setName("store_setup")
+    .setDescription("ตั้งค่าร้านค้า")
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.Administrator
+    ),
+
+  new SlashCommandBuilder()
+    .setName("storeadd")
+    .setDescription("เพิ่มสินค้าเข้าร้าน")
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.Administrator
+    ),
+
+  new SlashCommandBuilder()
+    .setName("gift")
+    .setDescription("ตั้งค่าปุ่มแลกรางวัล")
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.Administrator
+    ),
+
+  new SlashCommandBuilder()
+    .setName("gachasetup")
+    .setDescription("ตั้งค่าตู้กาชา")
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.Administrator
+    ),
+
+  new SlashCommandBuilder()
+    .setName("gachastart")
+    .setDescription("สร้างหน้าตู้กาชา")
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.Administrator
+    ),
+
+  new SlashCommandBuilder()
+    .setName("balance")
+    .setDescription("ดู Coins ของตัวเอง")
+
+].map(command => command.toJSON());
+
+// ============================================================
+// READY
+// ============================================================
+
+client.once("ready", async () => {
+
+  console.log(
+    `✅ ONLINE: ${client.user.tag}`
+  );
+
+  try {
+
+    if (GUILD_ID) {
+
+      const guild =
+        await client.guilds.fetch(GUILD_ID);
+
+      await guild.commands.set(commands);
+
+      console.log(
+        "✅ Slash Commands Registered"
+      );
+
+    } else {
+
+      await client.application.commands.set(
+        commands
+      );
+
+      console.log(
+        "✅ Global Slash Commands Registered"
+      );
+    }
+
+  } catch (error) {
+
+    console.error(
+      "❌ Command Register Error:",
+      error
+    );
+  }
+});
+
+// ============================================================
+// INTERACTION
+// ============================================================
+
 client.on(
-  'interactionCreate',
-  async i => {
+  "interactionCreate",
+  async interaction => {
+
     try {
 
-      if (i.isChatInputCommand()) {
+      // ======================================================
+      // SLASH COMMAND
+      // ======================================================
+
+      if (interaction.isChatInputCommand()) {
+
+        const adminCommands = [
+          "pymentsetting",
+          "startstore",
+          "store_setup",
+          "storeadd",
+          "gift",
+          "gachasetup",
+          "gachastart"
+        ];
 
         if (
-          i.commandName ===
-          'pymentsetting'
+          adminCommands.includes(
+            interaction.commandName
+          ) &&
+          !isAdmin(interaction)
         ) {
-          if (!admin(i)) {
-            return i.reply({
-              content:
-                '❌ เฉพาะ Administrator',
-              ephemeral: true
-            });
-          }
 
-          return showPaymentSetup1(i);
-        }
-
-        if (
-          i.commandName ===
-          'startstore'
-        ) {
-          if (!admin(i)) {
-            return i.reply({
-              content:
-                '❌ เฉพาะ Administrator',
-              ephemeral: true
-            });
-          }
-
-          await i.deferReply({
+          return interaction.reply({
+            content:
+              "❌ คำสั่งนี้ใช้ได้เฉพาะแอดมิน",
             ephemeral: true
           });
+        }
 
-          await refreshStore(i.guild);
+        // BALANCE
 
-          const ch =
-            await i.guild.channels
-              .fetch(
-                config.payment.topupChannelId
-              )
-              .catch(() => null);
+        if (
+          interaction.commandName ===
+          "balance"
+        ) {
 
-          if (
-            ch &&
-            ch.isTextBased()
-          ) {
-            await ch.send(
-              paymentPanel()
-            );
-          }
+          const user =
+            getUser(interaction.user.id);
 
-          return i.editReply(
-            '✅ สร้าง/รีเฟรชระบบเติมเงินแล้ว'
+          return interaction.reply(
+            `🪙 คุณมี **${user.coins.toLocaleString()} Coins**`
           );
         }
 
-        if (
-          i.commandName ===
-          'storeadd'
-        ) {
-          if (!admin(i)) {
-            return i.reply({
-              content:
-                '❌ เฉพาะ Administrator',
-              ephemeral: true
-            });
-          }
+        // PAYMENT SETUP
 
-          return showStoreAdd(i);
+        if (
+          interaction.commandName ===
+          "pymentsetting"
+        ) {
+
+          return interaction.showModal(
+            makeModal(
+              "payment_settings",
+              "ตั้งค่าระบบเติมเงิน",
+              [
+                makeField(
+                  "title",
+                  "หัวข้อการชำระเงิน"
+                ),
+                makeField(
+                  "description",
+                  "รายละเอียด",
+                  TextInputStyle.Paragraph
+                ),
+                makeField(
+                  "topupChannelId",
+                  "ID ห้องเติมเงิน"
+                ),
+                makeField(
+                  "slipChannelId",
+                  "ID ห้องแนบสลิป"
+                ),
+                makeField(
+                  "banner",
+                  "ลิงค์ Banner",
+                  TextInputStyle.Short,
+                  false
+                )
+              ]
+            )
+          );
         }
 
-        if (
-          i.commandName ===
-          'gift'
-        ) {
-          if (!admin(i)) {
-            return i.reply({
-              content:
-                '❌ เฉพาะ Administrator',
-              ephemeral: true
-            });
-          }
-
-          return showGiftSetup(i);
-        }
+        // START STORE
 
         if (
-          i.commandName ===
-          'gachasetup'
+          interaction.commandName ===
+          "startstore"
         ) {
-          if (!admin(i)) {
-            return i.reply({
-              content:
-                '❌ เฉพาะ Administrator',
-              ephemeral: true
-            });
-          }
-
-          return showGachaSetup1(i);
-        }
-
-        if (
-          i.commandName ===
-          'gachastart'
-        ) {
-          if (!admin(i)) {
-            return i.reply({
-              content:
-                '❌ เฉพาะ Administrator',
-              ephemeral: true
-            });
-          }
-
-          if (!gacha.channelId) {
-            return i.reply({
-              content:
-                '❌ กรุณาใช้ /gachasetup ก่อน',
-              ephemeral: true
-            });
-          }
-
-          const ch =
-            await i.guild.channels
-              .fetch(gacha.channelId)
-              .catch(() => null);
 
           if (
-            !ch ||
-            !ch.isTextBased()
+            !db.payment.topupChannelId
           ) {
-            return i.reply({
+
+            return interaction.reply({
               content:
-                '❌ ไม่พบห้องกาชา',
+                "❌ ยังไม่ได้ตั้งค่าห้องเติมเงิน",
               ephemeral: true
             });
           }
 
-          const msg =
-            await ch.send({
-              embeds: [
-                gachaEmbed()
-              ],
-              ...gachaComponents()
+          const channel =
+            getChannel(
+              interaction.guild,
+              db.payment.topupChannelId
+            );
+
+          if (!channel) {
+
+            return interaction.reply({
+              content:
+                "❌ ไม่พบห้องเติมเงิน",
+              ephemeral: true
             });
+          }
 
-          gacha.messageId =
-            msg.id;
+          await channel.send({
+            embeds: [
+              paymentEmbed()
+            ],
+            components: [
+              paymentButton()
+            ]
+          });
 
-          save('gacha', gacha);
-
-          return i.reply({
+          return interaction.reply({
             content:
-              '✅ สร้างหน้าตู้กาชาแล้ว',
+              `✅ สร้างหน้าระบบเติมเงินที่ ${channel} แล้ว`,
             ephemeral: true
           });
         }
 
+        // STORE SETUP
+
         if (
-          i.commandName ===
-          'gachareward'
+          interaction.commandName ===
+          "store_setup"
         ) {
-          if (!admin(i)) {
-            return i.reply({
+
+          return interaction.showModal(
+            makeModal(
+              "store_settings",
+              "ตั้งค่าระบบร้านค้า",
+              [
+                makeField(
+                  "name",
+                  "ชื่อร้านค้า"
+                ),
+                makeField(
+                  "description",
+                  "รายละเอียด",
+                  TextInputStyle.Paragraph
+                ),
+                makeField(
+                  "channelId",
+                  "ID ห้องร้านค้า"
+                ),
+                makeField(
+                  "buyLabel",
+                  "ชื่อปุ่มซื้อสินค้า"
+                ),
+                makeField(
+                  "banner",
+                  "ลิงค์ Banner",
+                  TextInputStyle.Short,
+                  false
+                )
+              ]
+            )
+          );
+        }
+
+        // STORE ADD
+
+        if (
+          interaction.commandName ===
+          "storeadd"
+        ) {
+
+          return interaction.showModal(
+            makeModal(
+              "store_add",
+              "เพิ่มสินค้า",
+              [
+                makeField(
+                  "name",
+                  "ชื่อ ITEM หรือ ยศ"
+                ),
+                makeField(
+                  "description",
+                  "รายละเอียดสินค้า",
+                  TextInputStyle.Paragraph
+                ),
+                makeField(
+                  "type",
+                  "ประเภท: ROLE หรือ ITEM"
+                ),
+                makeField(
+                  "price",
+                  "ราคาสินค้า Coins"
+                ),
+                makeField(
+                  "stock",
+                  "จำนวนสินค้า (-1 = ไม่จำกัด)"
+                )
+              ]
+            )
+          );
+        }
+
+        // GIFT SETUP
+
+        if (
+          interaction.commandName ===
+          "gift"
+        ) {
+
+          return interaction.showModal(
+            makeModal(
+              "gift_setup",
+              "ตั้งค่าปุ่มแลกรางวัล",
+              [
+                makeField(
+                  "label",
+                  "ชื่อปุ่มแลกรางวัล"
+                )
+              ]
+            )
+          );
+        }
+
+        // GACHA SETUP
+
+        if (
+          interaction.commandName ===
+          "gachasetup"
+        ) {
+
+          return interaction.showModal(
+            makeModal(
+              "gacha_setup",
+              "ตั้งค่าตู้กาชา",
+              [
+                makeField(
+                  "name",
+                  "ชื่อตู้กาชา"
+                ),
+                makeField(
+                  "description",
+                  "รายละเอียด",
+                  TextInputStyle.Paragraph
+                ),
+                makeField(
+                  "channelId",
+                  "ID ช่องกาชา"
+                ),
+                makeField(
+                  "banner",
+                  "ลิงค์ Banner",
+                  TextInputStyle.Short,
+                  false
+                ),
+                makeField(
+                  "ticketEmoji",
+                  "อิโมจิตั๋วกาชา"
+                )
+              ]
+            )
+          );
+        }
+
+        // GACHA START
+
+        if (
+          interaction.commandName ===
+          "gachastart"
+        ) {
+
+          if (!db.gacha.channelId) {
+
+            return interaction.reply({
               content:
-                '❌ เฉพาะ Administrator',
+                "❌ กรุณาตั้งค่าตู้กาชาก่อน",
               ephemeral: true
             });
           }
 
-          return showGachaReward(i);
-        }
+          ensureGachaTicket();
+          saveDB();
 
-        if (
-          i.commandName ===
-          'balance'
-        ) {
-          const u =
-            user(i.user.id);
+          await refreshGacha(
+            interaction.guild
+          );
 
-          return i.reply({
+          await refreshStore(
+            interaction.guild
+          );
+
+          return interaction.reply({
             content:
-              `🪙 Coins: **${u.coins}**\n` +
-              `🧂 เกลือ: **${u.salt}**\n` +
-              `🎟️ ตั๋วกาชา: **${u.tickets}**`,
+              "✅ สร้าง/อัปเดตหน้าตู้กาชาแล้ว\n" +
+              "🎟️ ตั๋วกาชาถูกเพิ่มเข้าร้านอัตโนมัติ",
+            components: [
+              new ActionRowBuilder().addComponents(
+
+                new ButtonBuilder()
+                  .setCustomId(
+                    "gacha_admin_add"
+                  )
+                  .setLabel(
+                    "➕ เพิ่มรางวัล"
+                  )
+                  .setStyle(
+                    ButtonStyle.Success
+                  ),
+
+                new ButtonBuilder()
+                  .setCustomId(
+                    "gacha_admin_remove"
+                  )
+                  .setLabel(
+                    "➖ ลบรางวัล"
+                  )
+                  .setStyle(
+                    ButtonStyle.Danger
+                  )
+
+              )
+            ],
             ephemeral: true
           });
         }
       }
 
-      if (
-        i.isButton()
-      ) {
+      // ======================================================
+      // MODALS
+      // ======================================================
+
+      if (interaction.isModalSubmit()) {
+
+        const value = id =>
+          interaction.fields
+            .getTextInputValue(id)
+            .trim();
+
+        // PAYMENT SETTINGS
 
         if (
-          i.customId ===
-          'topup_custom'
+          interaction.customId ===
+          "payment_settings"
         ) {
-          return showCustomAmount(i);
-        }
 
-        if (
-          i.customId ===
-          'gift_open'
-        ) {
-          const list =
-            Object.values(
-              gifts.items
-            ).filter(
-              g =>
-                g.stock === -1 ||
-                g.stock > 0
-            ).slice(0, 25);
+          db.payment.title =
+            value("title");
 
-          const menu =
-            new StringSelectMenuBuilder()
-              .setCustomId(
-                'gift_select'
-              )
-              .setPlaceholder(
-                '🎁 เลือกรางวัลที่ต้องการแลก'
-              )
-              .addOptions(
-                list.length
-                  ? list.map(g => ({
-                      label:
-                        g.name.slice(
-                          0,
-                          100
-                        ),
-                      description:
-                        `${g.cost} เกลือ`.slice(
-                          0,
-                          100
-                        ),
-                      value: g.id
-                    }))
-                  : [{
-                      label:
-                        'ยังไม่มีรางวัล',
-                      value:
-                        'none'
-                    }]
-              );
+          db.payment.description =
+            value("description");
 
-          return i.reply({
+          db.payment.topupChannelId =
+            value("topupChannelId");
+
+          db.payment.slipChannelId =
+            value("slipChannelId");
+
+          db.payment.banner =
+            value("banner");
+
+          saveDB();
+
+          return interaction.reply({
             content:
-              '🎁 เลือกรางวัลที่ต้องการแลก',
+              "✅ บันทึกระบบหลักแล้ว\n" +
+              "กดปุ่มด้านล่างเพื่อเพิ่มช่องทางชำระเงิน",
             components: [
-              new ActionRowBuilder()
-                .addComponents(
-                  menu
-                )
+              new ActionRowBuilder().addComponents(
+
+                new ButtonBuilder()
+                  .setCustomId(
+                    "payment_add"
+                  )
+                  .setLabel(
+                    "➕ เพิ่มช่องทางชำระเงิน"
+                  )
+                  .setStyle(
+                    ButtonStyle.Primary
+                  ),
+
+                new ButtonBuilder()
+                  .setCustomId(
+                    "payment_list"
+                  )
+                  .setLabel(
+                    "📋 ดูช่องทาง"
+                  )
+                  .setStyle(
+                    ButtonStyle.Secondary
+                  )
+
+              ]
             ],
             ephemeral: true
           });
         }
 
+        // PAYMENT METHOD
+
         if (
-          i.customId ===
-          'gacha_spin'
+          interaction.customId ===
+          "payment_method"
         ) {
-          const u =
-            user(i.user.id);
 
-          const menu =
-            new StringSelectMenuBuilder()
-              .setCustomId(
-                'gacha_count'
-              )
-              .setPlaceholder(
-                '🎰 เลือกจำนวนครั้ง'
-              )
-              .addOptions(
-                {
-                  label:
-                    'สุ่ม 1 ครั้ง',
-                  description:
-                    'ใช้ 1 ตั๋ว',
-                  value:
-                    '1'
-                },
-                {
-                  label:
-                    'สุ่ม 5 ครั้ง',
-                  description:
-                    'ใช้ 5 ตั๋ว',
-                  value:
-                    '5'
-                },
-                {
-                  label:
-                    'สุ่ม 10 ครั้ง',
-                  description:
-                    'ใช้ 10 ตั๋ว',
-                  value:
-                    '10'
-                }
-              );
+          const type =
+            value("type");
 
-          return i.reply({
+          const details =
+            value("details");
+
+          const qr =
+            value("qr");
+
+          db.payment.methods.push({
+            type,
+            details,
+            qr,
+            summary: details
+          });
+
+          saveDB();
+
+          return interaction.reply({
             content:
-              `🎟️ ตั๋วของคุณ: **${u.tickets}**`,
-            components: [
-              new ActionRowBuilder()
-                .addComponents(
-                  menu
-                )
-            ],
+              `✅ เพิ่มช่องทาง **${type}** แล้ว`,
             ephemeral: true
           });
         }
 
+        // STORE SETTINGS
+
         if (
-          i.customId ===
-          'buycancel'
+          interaction.customId ===
+          "store_settings"
         ) {
-          return i.update({
+
+          db.store.name =
+            value("name");
+
+          db.store.description =
+            value("description");
+
+          db.store.channelId =
+            value("channelId");
+
+          db.store.buyLabel =
+            value("buyLabel");
+
+          db.store.banner =
+            value("banner");
+
+          saveDB();
+
+          await refreshStore(
+            interaction.guild
+          );
+
+          return interaction.reply({
             content:
-              `❌ คุณ ${i.user} ได้ยกเลิกคำสั่งซื้อแล้ว`,
-            embeds: [],
-            components: []
+              "✅ ตั้งค่าร้านค้าแล้ว และอัปเดตหน้าร้านทันที",
+            ephemeral: true
           });
         }
 
+        // STORE ADD
+
         if (
-          i.customId.startsWith(
-            'buyok:'
-          )
+          interaction.customId ===
+          "store_add"
         ) {
-          const [
-            ,
-            id,
-            qtyText
-          ] =
-            i.customId.split(':');
 
-          const qty =
-            Number(qtyText);
+          const name =
+            value("name");
 
-          const p =
-            store.products[id];
+          const description =
+            value("description");
 
-          if (!p) {
-            return i.reply({
+          const type =
+            value("type").toUpperCase();
+
+          const price =
+            Number(value("price"));
+
+          const stock =
+            Number(value("stock"));
+
+          if (
+            !["ROLE", "ITEM"].includes(
+              type
+            )
+          ) {
+
+            return interaction.reply({
               content:
-                '❌ ไม่พบสินค้า',
+                "❌ ประเภทต้องเป็น ROLE หรือ ITEM",
               ephemeral: true
             });
           }
 
-          const u =
-            user(i.user.id);
+          if (
+            !Number.isFinite(price) ||
+            price < 0
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ ราคาสินค้าไม่ถูกต้อง",
+              ephemeral: true
+            });
+          }
+
+          if (
+            !Number.isInteger(stock) ||
+            stock === 0
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ จำนวนต้องเป็นจำนวนเต็ม และหากไม่จำกัดให้ใส่ -1",
+              ephemeral: true
+            });
+          }
+
+          const item = {
+            id:
+              Date.now().toString(),
+            name,
+            description,
+            type,
+            price,
+            stock
+          };
+
+          // ROLE
+
+          if (type === "ROLE") {
+
+            const role =
+              interaction.guild.roles.cache.find(
+                r =>
+                  r.name.toLowerCase() ===
+                  name.toLowerCase()
+              );
+
+            if (!role) {
+
+              return interaction.reply({
+                content:
+                  `❌ ไม่พบยศ **${name}** ในเซิร์ฟเวอร์`,
+                ephemeral: true
+              });
+            }
+
+            item.roleId =
+              role.id;
+          }
+
+          db.items.push(item);
+
+          saveDB();
+
+          // สำคัญ: อัปเดตหน้าร้านทันที
+
+          await refreshStore(
+            interaction.guild
+          );
+
+          return interaction.reply({
+            content:
+              `✅ เพิ่มสินค้า **${name}** แล้ว\n` +
+              `💰 ราคา: ${price} Coins\n` +
+              `📦 จำนวน: ${
+                stock < 0
+                  ? "ไม่จำกัด"
+                  : stock
+              }\n\n` +
+              "🛒 หน้าร้านถูกอัปเดตอัตโนมัติแล้ว",
+            ephemeral: true
+          });
+        }
+
+        // GIFT SETUP
+
+        if (
+          interaction.customId ===
+          "gift_setup"
+        ) {
+
+          db.store.giftLabel =
+            value("label");
+
+          saveDB();
+
+          await refreshStore(
+            interaction.guild
+          );
+
+          return interaction.reply({
+            content:
+              "✅ ตั้งค่าปุ่มแลกรางวัลแล้ว",
+            ephemeral: true
+          });
+        }
+
+        // GACHA SETUP
+
+        if (
+          interaction.customId ===
+          "gacha_setup"
+        ) {
+
+          db.gacha.name =
+            value("name");
+
+          db.gacha.description =
+            value("description");
+
+          db.gacha.channelId =
+            value("channelId");
+
+          db.gacha.banner =
+            value("banner");
+
+          db.gacha.ticketEmoji =
+            value("ticketEmoji");
+
+          saveDB();
+
+          return interaction.reply({
+            content:
+              "✅ บันทึกข้อมูลตู้กาชาแล้ว\n" +
+              "กดปุ่มด้านล่างเพื่อตั้งค่าตั๋วและปุ่มสุ่ม",
+            components: [
+              new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                  .setCustomId(
+                    "gacha_more"
+                  )
+                  .setLabel(
+                    "⚙️ ตั้งค่าตั๋วกาชาเพิ่มเติม"
+                  )
+                  .setStyle(
+                    ButtonStyle.Primary
+                  )
+              )
+            ],
+            ephemeral: true
+          });
+        }
+
+        // GACHA MORE
+
+        if (
+          interaction.customId ===
+          "gacha_more_modal"
+        ) {
+
+          db.gacha.ticketName =
+            value("ticketName");
+
+          db.gacha.buttonLabel =
+            value("buttonLabel");
+
+          db.gacha.loadingBanner =
+            value("loadingBanner");
+
+          ensureGachaTicket();
+
+          saveDB();
+
+          await refreshStore(
+            interaction.guild
+          );
+
+          return interaction.reply({
+            content:
+              "✅ ตั้งค่าตั๋วกาชาแล้ว\n" +
+              "🎟️ ตั๋วกาชาถูกเพิ่มเข้าร้านอัตโนมัติ",
+            ephemeral: true
+          });
+        }
+
+        // ADD GACHA REWARD
+
+        if (
+          interaction.customId ===
+          "gacha_reward_add"
+        ) {
+
+          const name =
+            value("name");
+
+          const amount =
+            Math.max(
+              1,
+              Number(value("amount"))
+            );
+
+          const weight =
+            Number(value("weight"));
+
+          const type =
+            value("type").toUpperCase();
+
+          if (
+            !["ROLE", "ITEM"].includes(
+              type
+            )
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ ประเภทต้องเป็น ROLE หรือ ITEM",
+              ephemeral: true
+            });
+          }
+
+          if (
+            !Number.isFinite(weight) ||
+            weight <= 0
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ โอกาสออกต้องมากกว่า 0",
+              ephemeral: true
+            });
+          }
+
+          const reward = {
+            id:
+              Date.now().toString(),
+            name,
+            amount,
+            weight,
+            type,
+            stock: amount
+          };
+
+          if (type === "ROLE") {
+
+            const role =
+              interaction.guild.roles.cache.find(
+                r =>
+                  r.name.toLowerCase() ===
+                  name.toLowerCase()
+              );
+
+            if (!role) {
+
+              return interaction.reply({
+                content:
+                  `❌ ไม่พบยศ **${name}**`,
+                ephemeral: true
+              });
+            }
+
+            reward.roleId =
+              role.id;
+          }
+
+          db.gachaRewards.push(
+            reward
+          );
+
+          saveDB();
+
+          await refreshGacha(
+            interaction.guild
+          );
+
+          return interaction.reply({
+            content:
+              `✅ เพิ่มรางวัล **${name}** แล้ว\n` +
+              "📊 ระบบคำนวณเปอร์เซ็นต์ใหม่อัตโนมัติ",
+            ephemeral: true
+          });
+        }
+
+        // REMOVE GACHA REWARD
+
+        if (
+          interaction.customId ===
+          "gacha_reward_remove"
+        ) {
+
+          const name =
+            value("name")
+              .toLowerCase();
+
+          const before =
+            db.gachaRewards.length;
+
+          db.gachaRewards =
+            db.gachaRewards.filter(
+              reward =>
+                reward.name
+                  .toLowerCase() !==
+                name
+            );
+
+          saveDB();
+
+          await refreshGacha(
+            interaction.guild
+          );
+
+          return interaction.reply({
+            content:
+              before ===
+              db.gachaRewards.length
+                ? "❌ ไม่พบรางวัล"
+                : "✅ ลบรางวัลแล้ว",
+            ephemeral: true
+          });
+        }
+
+        // ADD GIFT
+
+        if (
+          interaction.customId ===
+          "gift_add"
+        ) {
+
+          const name =
+            value("name");
+
+          const costSalt =
+            Number(value("costSalt"));
+
+          const stock =
+            Number(value("stock"));
+
+          const type =
+            value("type").toUpperCase();
+
+          if (
+            !["ROLE", "ITEM"].includes(
+              type
+            )
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ ประเภทต้องเป็น ROLE หรือ ITEM",
+              ephemeral: true
+            });
+          }
+
+          if (
+            !Number.isFinite(
+              costSalt
+            ) ||
+            costSalt < 1
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ จำนวนเกลือไม่ถูกต้อง",
+              ephemeral: true
+            });
+          }
+
+          if (
+            !Number.isInteger(stock) ||
+            stock === 0
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ จำนวนสินค้าไม่ถูกต้อง",
+              ephemeral: true
+            });
+          }
+
+          const gift = {
+            id:
+              Date.now().toString(),
+            name,
+            costSalt,
+            stock,
+            type
+          };
+
+          if (type === "ROLE") {
+
+            const role =
+              interaction.guild.roles.cache.find(
+                r =>
+                  r.name.toLowerCase() ===
+                  name.toLowerCase()
+              );
+
+            if (!role) {
+
+              return interaction.reply({
+                content:
+                  `❌ ไม่พบยศ **${name}**`,
+                ephemeral: true
+              });
+            }
+
+            gift.roleId =
+              role.id;
+          }
+
+          db.gifts.push(gift);
+
+          saveDB();
+
+          await refreshStore(
+            interaction.guild
+          );
+
+          return interaction.reply({
+            content:
+              `✅ เพิ่มรางวัล **${name}** แล้ว\n` +
+              "🎁 หน้าร้านอัปเดตอัตโนมัติ",
+            ephemeral: true
+          });
+        }
+
+        // CUSTOM TOPUP
+
+        if (
+          interaction.customId ===
+          "custom_topup"
+        ) {
+
+          const coins =
+            Math.floor(
+              Number(value("coins"))
+            );
+
+          if (
+            !Number.isFinite(coins) ||
+            coins < 1
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ จำนวน Coins ต้องมากกว่า 0",
+              ephemeral: true
+            });
+          }
+
+          const baht =
+            getTopupPrice(coins);
+
+          getUser(
+            interaction.user.id
+          ).pendingTopup = {
+            coins,
+            baht
+          };
+
+          saveDB();
+
+          return interaction.reply({
+            content:
+              `💰 จำนวน Coins: **${coins.toLocaleString()}**\n` +
+              `💵 ต้องชำระ: **${money(baht)} บาท**\n\n` +
+              `เมื่อชำระเงินแล้ว ให้แนบสลิปใน <#${db.payment.slipChannelId}>`,
+            ephemeral: true
+          });
+        }
+
+        // BUY ITEM QUANTITY
+
+        if (
+          interaction.customId.startsWith(
+            "buy_quantity:"
+          )
+        ) {
+
+          const itemId =
+            interaction.customId.split(
+              ":"
+            )[1];
+
+          const item =
+            db.items.find(
+              x => x.id === itemId
+            );
+
+          if (!item) {
+
+            return interaction.reply({
+              content:
+                "❌ ไม่พบสินค้า",
+              ephemeral: true
+            });
+          }
+
+          const quantity =
+            Math.floor(
+              Number(value("quantity"))
+            );
+
+          if (
+            !Number.isInteger(
+              quantity
+            ) ||
+            quantity < 1
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ จำนวนไม่ถูกต้อง",
+              ephemeral: true
+            });
+          }
+
+          if (
+            item.stock >= 0 &&
+            item.stock < quantity
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ สินค้าเหลือไม่พอ",
+              ephemeral: true
+            });
+          }
 
           const total =
-            p.price * qty;
+            item.price *
+            quantity;
 
-          if (
-            u.coins < total
-          ) {
-            return i.reply({
-              content:
-                `❌ Coins ไม่พอ\nต้องใช้ ${total} Coins\nคุณมี ${u.coins} Coins`,
-              ephemeral: true
-            });
-          }
+          return interaction.reply({
+            content:
+              "🧾 **รายละเอียดคำสั่งซื้อ**\n\n" +
+              `ชื่อสินค้า: **${item.name}**\n` +
+              `ราคา: **${item.price} Coins**\n` +
+              `จำนวน: **${quantity}**\n` +
+              `รวม: **${total} Coins**`,
+            components: [
+              new ActionRowBuilder().addComponents(
 
-          if (
-            p.stock !== -1 &&
-            p.stock < qty
-          ) {
-            return i.reply({
-              content:
-                '❌ สินค้าไม่พอ',
-              ephemeral: true
-            });
-          }
-
-          u.coins -= total;
-
-          if (
-            p.stock !== -1
-          ) {
-            p.stock -= qty;
-          }
-
-          if (
-            p.gachaTicket
-          ) {
-            u.tickets += qty;
-          } else if (
-            p.type ===
-            'ROLE'
-          ) {
-            const role =
-              p.roleId
-                ? i.guild.roles.cache.get(
-                    p.roleId
+                new ButtonBuilder()
+                  .setCustomId(
+                    `confirm_buy:${item.id}:${quantity}`
                   )
-                : roleByName(
-                    i.guild,
-                    p.name
-                  );
+                  .setLabel(
+                    "ยืนยันคำสั่งซื้อ"
+                  )
+                  .setStyle(
+                    ButtonStyle.Success
+                  ),
 
-            if (role) {
-              await i.member.roles
-                .add(role)
-                .catch(() => {});
-            }
-          } else {
-            addItem(
-              i.user.id,
-              p.name,
-              qty
-            );
-          }
+                new ButtonBuilder()
+                  .setCustomId(
+                    "cancel_buy"
+                  )
+                  .setLabel(
+                    "ยกเลิกคำสั่งซื้อ"
+                  )
+                  .setStyle(
+                    ButtonStyle.Danger
+                  )
 
-          u.purchases++;
-
-          save('users', users);
-          save('store', store);
-
-          await refreshStore(
-            i.guild
-          );
-
-          return i.update({
-            content:
-              `✅ **สั่งซื้อสินค้าแล้ว**\n\n` +
-              `ชื่อสินค้า : ${p.name}\n` +
-              `จำนวน : ${qty}\n` +
-              `ราคา : ${total} Coins\n` +
-              `ประเภทสินค้า : ${p.type}`,
-            embeds: [],
-            components: []
-          });
-        }
-
-        if (
-          i.customId.startsWith(
-            'approve:'
-          )
-        ) {
-          if (!admin(i)) {
-            return i.reply({
-              content:
-                '❌ เฉพาะ Administrator',
-              ephemeral: true
-            });
-          }
-
-          const [
-            ,
-            uid,
-            coins,
-            amount
-          ] =
-            i.customId.split(':');
-
-          const u =
-            user(uid);
-
-          u.coins +=
-            Number(coins);
-
-          save(
-            'users',
-            users
-          );
-
-          const member =
-            await i.guild.members
-              .fetch(uid)
-              .catch(() => null);
-
-          if (member) {
-            await member.send(
-              `💰 **ชำระเงินสำเร็จ**
-
-ท่านได้ชำระเงินแล้วจำนวน : **${money(amount)} บาท**
-ได้รับ : **${Number(coins).toLocaleString()} Coins**
-เมื่อเวลา : ${new Date().toLocaleString('th-TH')}
-ตรวจสอบโดย : **${i.user.tag}**`
-            ).catch(() => {});
-          }
-
-          return i.update({
-            content:
-              `✅ อนุมัติการเติมเงินแล้ว\nผู้ใช้ <@${uid}>\nจำนวน ${amount} บาท\nได้รับ ${coins} Coins\nตรวจสอบโดย ${i.user}`,
-            embeds: [],
-            components: []
-          });
-        }
-
-        if (
-          i.customId.startsWith(
-            'reject:'
-          )
-        ) {
-          if (!admin(i)) {
-            return i.reply({
-              content:
-                '❌ เฉพาะ Administrator',
-              ephemeral: true
-            });
-          }
-
-          const [
-            ,
-            uid,
-            ,
-            amount
-          ] =
-            i.customId.split(':');
-
-          const member =
-            await i.guild.members
-              .fetch(uid)
-              .catch(() => null);
-
-          if (member) {
-            await member.send(
-              `❌ รายการเติมเงินของคุณถูกยกเลิก
-
-ยอดที่แจ้ง : ${money(amount)} บาท
-ตรวจสอบโดย : ${i.user.tag}`
-            ).catch(() => {});
-          }
-
-          return i.update({
-            content:
-              `❌ ยกเลิกรายการเติมเงินแล้ว\nผู้ใช้ <@${uid}>\nตรวจสอบโดย ${i.user}`,
-            embeds: [],
-            components: []
+              )
+            ],
+            ephemeral: true
           });
         }
       }
 
-      if (
-        i.isStringSelectMenu()
-      ) {
+      // ======================================================
+      // BUTTONS
+      // ======================================================
+
+      if (interaction.isButton()) {
+
+        // TOPUP
 
         if (
-          i.customId ===
-          'pay_method'
+          interaction.customId ===
+          "topup_open"
         ) {
+
           if (
-            i.values[0] ===
-            'none'
+            !db.payment.methods.length
           ) {
-            return i.reply({
+
+            return interaction.reply({
               content:
-                '❌ ยังไม่ได้ตั้งค่าช่องทางชำระเงิน',
+                "❌ ยังไม่มีช่องทางชำระเงิน",
               ephemeral: true
             });
           }
 
-          return i.reply({
-            embeds: [
-              paymentEmbed(
-                i.values[0]
+          return interaction.reply({
+            content:
+              "💳 เลือกช่องทางชำระเงิน",
+            components: [
+              paymentMethodMenu()
+            ],
+            ephemeral: true
+          });
+        }
+
+        // PAYMENT ADD
+
+        if (
+          interaction.customId ===
+          "payment_add"
+        ) {
+
+          return interaction.showModal(
+            makeModal(
+              "payment_method",
+              "เพิ่มช่องทางชำระเงิน",
+              [
+                makeField(
+                  "type",
+                  "ประเภท เช่น TrueMoney / ธนาคาร / QR"
+                ),
+                makeField(
+                  "details",
+                  "รายละเอียดบัญชี",
+                  TextInputStyle.Paragraph
+                ),
+                makeField(
+                  "qr",
+                  "ลิงค์รูป QR Code",
+                  TextInputStyle.Short,
+                  false
+                )
+              ]
+            )
+          );
+        }
+
+        // PAYMENT LIST
+
+        if (
+          interaction.customId ===
+          "payment_list"
+        ) {
+
+          const methods =
+            db.payment.methods;
+
+          if (!methods.length) {
+
+            return interaction.reply({
+              content:
+                "ยังไม่มีช่องทางชำระเงิน",
+              ephemeral: true
+            });
+          }
+
+          return interaction.reply({
+            content:
+              methods
+                .map(
+                  (m, i) =>
+                    `${i + 1}. **${m.type}**\n${m.details}`
+                )
+                .join("\n\n"),
+            ephemeral: true
+          });
+        }
+
+        // CUSTOM TOPUP BUTTON
+
+        if (
+          interaction.customId ===
+          "custom_topup_button"
+        ) {
+
+          return interaction.showModal(
+            makeModal(
+              "custom_topup",
+              "กำหนดจำนวน Coins",
+              [
+                makeField(
+                  "coins",
+                  "จำนวน Coins",
+                  TextInputStyle.Short,
+                  true,
+                  "ขั้นต่ำ 1 Coin"
+                )
+              ]
+            )
+          );
+        }
+
+        // STORE GIFT
+
+        if (
+          interaction.customId ===
+          "store_gift"
+        ) {
+
+          const available =
+            db.gifts
+              .filter(
+                x => x.stock !== 0
+              )
+              .slice(0, 25);
+
+          if (!available.length) {
+
+            return interaction.reply({
+              content:
+                "🎁 ยังไม่มีรางวัลที่พร้อมแลก",
+              ephemeral: true
+            });
+          }
+
+          return interaction.reply({
+            content:
+              "🎁 เลือกรางวัลที่ต้องการแลก",
+            components: [
+              new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                  .setCustomId(
+                    "gift_select"
+                  )
+                  .setPlaceholder(
+                    "เลือกรางวัล"
+                  )
+                  .addOptions(
+                    available.map(
+                      gift =>
+                        new StringSelectMenuOptionBuilder()
+                          .setLabel(
+                            truncate(
+                              gift.name
+                            )
+                          )
+                          .setValue(
+                            gift.id
+                          )
+                          .setDescription(
+                            `${gift.costSalt} เกลือ | เหลือ ${
+                              gift.stock < 0
+                                ? "ไม่จำกัด"
+                                : gift.stock
+                            }`
+                          )
+                    )
+                  )
               )
             ],
             ephemeral: true
           });
         }
 
+        // GACHA MORE
+
         if (
-          i.customId ===
-          'store_buy'
+          interaction.customId ===
+          "gacha_more"
         ) {
-          const id =
-            i.values[0];
 
-          if (
-            id === 'none'
-          ) {
-            return i.reply({
-              content:
-                '❌ ยังไม่มีสินค้าที่พร้อมขาย',
-              ephemeral: true
-            });
-          }
-
-          const p =
-            store.products[id];
-
-          if (!p) {
-            return i.reply({
-              content:
-                '❌ ไม่พบสินค้า',
-              ephemeral: true
-            });
-          }
-
-          if (
-            p.stock !== -1 &&
-            p.stock <= 0
-          ) {
-            return i.reply({
-              content:
-                '❌ สินค้าหมดแล้ว',
-              ephemeral: true
-            });
-          }
-
-          if (
-            p.type ===
-            'ROLE' ||
-            p.gachaTicket
-          ) {
-            const e =
-              new EmbedBuilder()
-                .setColor(
-                  0x5865F2
+          return interaction.showModal(
+            makeModal(
+              "gacha_more_modal",
+              "ตั้งค่าตั๋วกาชา",
+              [
+                makeField(
+                  "ticketName",
+                  "ชื่อตั๋วกาชา"
+                ),
+                makeField(
+                  "buttonLabel",
+                  "ชื่อปุ่มสุ่มกาชา"
+                ),
+                makeField(
+                  "loadingBanner",
+                  "ลิงค์ Banner ตอนสุ่ม",
+                  TextInputStyle.Short,
+                  false
                 )
-                .setTitle(
-                  '🛒 ยืนยันคำสั่งซื้อ'
-                )
-                .setDescription(
-                  `ชื่อสินค้า : ${p.name}\n` +
-                  `ราคา : ${p.price} Coins\n` +
-                  `จำนวน : 1`
-                );
-
-            return i.reply({
-              ephemeral: true,
-              embeds: [e],
-              components: [
-                new ActionRowBuilder()
-                  .addComponents(
-                    new ButtonBuilder()
-                      .setCustomId(
-                        `buyok:${id}:1`
-                      )
-                      .setLabel(
-                        'ยืนยันคำสั่งซื้อ'
-                      )
-                      .setStyle(
-                        ButtonStyle.Success
-                      ),
-
-                    new ButtonBuilder()
-                      .setCustomId(
-                        'buycancel'
-                      )
-                      .setLabel(
-                        'ยกเลิกคำสั่งซื้อ'
-                      )
-                      .setStyle(
-                        ButtonStyle.Danger
-                      )
-                  )
               ]
-            });
-          }
-
-          return showQty(
-            i,
-            id
+            )
           );
         }
 
+        // GACHA ADD
+
         if (
-          i.customId ===
-          'gift_select'
+          interaction.customId ===
+          "gacha_admin_add"
         ) {
-          const id =
-            i.values[0];
 
-          const g =
-            gifts.items[id];
+          return interaction.showModal(
+            makeModal(
+              "gacha_reward_add",
+              "เพิ่มรางวัลกาชา",
+              [
+                makeField(
+                  "name",
+                  "ชื่อรางวัล"
+                ),
+                makeField(
+                  "amount",
+                  "จำนวน"
+                ),
+                makeField(
+                  "weight",
+                  "โอกาสออก / Weight"
+                ),
+                makeField(
+                  "type",
+                  "ประเภท ROLE หรือ ITEM"
+                )
+              ]
+            )
+          );
+        }
 
-          if (!g) {
-            return i.reply({
-              content:
-                '❌ ไม่พบรางวัล',
-              ephemeral: true
-            });
-          }
+        // GACHA REMOVE
 
-          const u =
-            user(i.user.id);
+        if (
+          interaction.customId ===
+          "gacha_admin_remove"
+        ) {
 
-          if (
-            u.salt < g.cost
-          ) {
-            return i.reply({
-              content:
-                `❌ เกลือไม่พอ\nต้องใช้ ${g.cost} เกลือ\nคุณมี ${u.salt} เกลือ`,
-              ephemeral: true
-            });
-          }
+          return interaction.showModal(
+            makeModal(
+              "gacha_reward_remove",
+              "ลบรางวัลกาชา",
+              [
+                makeField(
+                  "name",
+                  "ชื่อรางวัล"
+                )
+              ]
+            )
+          );
+        }
 
-          if (
-            g.stock !== -1 &&
-            g.stock <= 0
-          ) {
-            return i.reply({
-              content:
-                '❌ รางวัลหมดแล้ว',
-              ephemeral: true
-            });
-          }
+        // GACHA ROLL
 
-          u.salt -= g.cost;
+        if (
+          interaction.customId ===
+          "gacha_roll"
+        ) {
 
-          if (
-            g.stock !== -1
-          ) {
-            g.stock--;
-          }
-
-          if (
-            g.type ===
-            'ROLE'
-          ) {
-            const role =
-              roleByName(
-                i.guild,
-                g.name
-              );
-
-            if (role) {
-              await i.member.roles
-                .add(role)
-                .catch(() => {});
-            }
-          } else {
-            addItem(
-              i.user.id,
-              g.name,
-              1
+          const user =
+            getUser(
+              interaction.user.id
             );
+
+          const tickets =
+            user.inventory[
+              db.gacha.ticketName
+            ] || 0;
+
+          if (tickets < 1) {
+
+            return interaction.reply({
+              content:
+                `❌ คุณไม่มี ${db.gacha.ticketName}`,
+              ephemeral: true
+            });
           }
 
-          save(
-            'users',
-            users
-          );
-
-          save(
-            'gifts',
-            gifts
-          );
-
-          await refreshStore(
-            i.guild
-          );
-
-          return i.reply({
+          return interaction.reply({
             content:
-              `🎁 แลกรางวัลสำเร็จ\n\n` +
-              `รางวัล : **${g.name}**\n` +
-              `ใช้ : **${g.cost} เกลือ**`,
+              "🎰 เลือกจำนวนครั้งที่ต้องการสุ่ม",
+            components: [
+              new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                  .setCustomId(
+                    "gacha_count"
+                  )
+                  .setPlaceholder(
+                    "จำนวนครั้ง"
+                  )
+                  .addOptions(
+                    [1, 5, 10].map(
+                      amount =>
+                        new StringSelectMenuOptionBuilder()
+                          .setLabel(
+                            `${amount} ครั้ง`
+                          )
+                          .setValue(
+                            String(amount)
+                          )
+                          .setDescription(
+                            `${amount} ตั๋ว`
+                          )
+                    )
+                  )
+              )
+            ],
             ephemeral: true
           });
         }
 
+        // CANCEL BUY
+
         if (
-          i.customId ===
-          'gacha_count'
+          interaction.customId ===
+          "cancel_buy"
         ) {
-          const count =
-            Number(i.values[0]);
 
-          const u =
-            user(i.user.id);
+          return interaction.update({
+            content:
+              `❌ คุณ ${interaction.user} ได้ยกเลิกคำสั่งซื้อแล้ว`,
+            components: []
+          });
+        }
 
-          if (
-            u.tickets < count
-          ) {
-            return i.update({
+        // CONFIRM BUY
+
+        if (
+          interaction.customId.startsWith(
+            "confirm_buy:"
+          )
+        ) {
+
+          const parts =
+            interaction.customId.split(
+              ":"
+            );
+
+          const itemId =
+            parts[1];
+
+          const quantity =
+            Number(parts[2]);
+
+          const item =
+            db.items.find(
+              x => x.id === itemId
+            );
+
+          if (!item) {
+
+            return interaction.update({
               content:
-                `❌ ตั๋วกาชาไม่พอ\nต้องใช้ ${count} ตั๋ว\nคุณมี ${u.tickets} ตั๋ว`,
+                "❌ ไม่พบสินค้า",
               components: []
             });
           }
 
-          u.tickets -= count;
+          const user =
+            getUser(
+              interaction.user.id
+            );
 
-          const rewards = [];
+          const total =
+            item.price *
+            quantity;
 
-          for (
-            let n = 0;
-            n < count;
-            n++
+          if (
+            user.coins < total
           ) {
-            const r =
-              pickReward();
 
-            if (!r) break;
-
-            rewards.push(r);
-
-            if (
-              r.unlimited !== 1 &&
-              r.quantity > 0
-            ) {
-              r.quantity--;
-            }
-
-            if (
-              r.type ===
-              'ROLE'
-            ) {
-              const role =
-                roleByName(
-                  i.guild,
-                  r.name
-                );
-
-              if (role) {
-                await i.member.roles
-                  .add(role)
-                  .catch(() => {});
-              }
-            } else if (
-              r.name.toLowerCase() ===
-              'coins'
-            ) {
-              u.coins +=
-                Number(
-                  r.quantity ||
-                  1
-                );
-            } else if (
-              r.name.toLowerCase() ===
-              'เกลือ'
-            ) {
-              u.salt++;
-            } else {
-              addItem(
-                i.user.id,
-                r.name,
-                1
-              );
-            }
+            return interaction.update({
+              content:
+                `❌ Coins ไม่พอ\nคุณมี ${user.coins} Coins แต่ต้องใช้ ${total} Coins`,
+              components: []
+            });
           }
 
-          save(
-            'users',
-            users
+          if (
+            item.stock === 0 ||
+            (
+              item.stock > 0 &&
+              item.stock < quantity
+            )
+          ) {
+
+            return interaction.update({
+              content:
+                "❌ สินค้าเหลือไม่พอ",
+              components: []
+            });
+          }
+
+          user.coins -= total;
+
+          if (item.stock > 0) {
+            item.stock -= quantity;
+          }
+
+          if (
+            item.type ===
+            "ROLE"
+          ) {
+
+            const role =
+              interaction.guild.roles.cache.get(
+                item.roleId
+              );
+
+            if (role) {
+
+              await interaction.member.roles
+                .add(role)
+                .catch(() => {});
+            }
+
+          } else {
+
+            addItem(
+              interaction.user.id,
+              item.name,
+              quantity
+            );
+          }
+
+          saveDB();
+
+          await refreshStore(
+            interaction.guild
           );
 
-          save(
-            'gacha',
-            gacha
-          );
-
-          await i.update({
+          return interaction.update({
             content:
-              '🎰 **กำลังสุ่มกาชา...**\n\nLOADING...',
+              "✅ **สั่งซื้อสินค้าแล้ว**\n\n" +
+              `ชื่อสินค้า: ${item.name}\n` +
+              `จำนวน: ${quantity}\n` +
+              `ราคา: ${total} Coins\n` +
+              `ประเภทสินค้า: ${item.type}`,
             components: []
           });
-
-          setTimeout(
-            async () => {
-              const names =
-                rewards.length
-                  ? rewards.map(
-                      r =>
-                        `🎁 ${r.name}`
-                    ).join('\n')
-                  : '❌ ไม่มีรางวัล';
-
-              await i.editReply({
-                content:
-                  `🎰 **สุ่มกาชาเสร็จแล้ว!**\n\n${names}`,
-                components: []
-              }).catch(
-                () => {}
-              );
-
-              await updateGachaMessage(
-                i.guild
-              );
-            },
-            5000
-          );
-
-          return;
         }
 
+        // APPROVE TOPUP
+
         if (
-          i.customId ===
-          'gacha_delete'
+          interaction.customId.startsWith(
+            "approve_topup:"
+          )
         ) {
-          if (!admin(i)) {
-            return i.reply({
+
+          if (!isAdmin(interaction)) {
+
+            return interaction.reply({
               content:
-                '❌ เฉพาะ Administrator',
+                "❌ เฉพาะแอดมิน",
               ephemeral: true
             });
           }
 
-          gacha.rewards =
-            gacha.rewards.filter(
-              x =>
-                x.id !==
-                i.values[0]
+          const parts =
+            interaction.customId.split(
+              ":"
             );
 
-          save(
-            'gacha',
-            gacha
-          );
+          const userId =
+            parts[1];
 
-          await updateGachaMessage(
-            i.guild
-          );
+          const coins =
+            Number(parts[2]);
 
-          return i.reply({
+          const baht =
+            Number(parts[3]);
+
+          const user =
+            getUser(userId);
+
+          user.coins += coins;
+          user.pendingTopup = null;
+
+          saveDB();
+
+          const discordUser =
+            await client.users
+              .fetch(userId)
+              .catch(() => null);
+
+          if (discordUser) {
+
+            await sendDM(
+              discordUser,
+              {
+                embeds: [
+                  new EmbedBuilder()
+                    .setTitle(
+                      "✅ เติมเงินสำเร็จ"
+                    )
+                    .setColor(
+                      0x2ecc71
+                    )
+                    .setDescription(
+                      `ท่านได้ชำระเงินแล้วจำนวน **${money(baht)} บาท**\n\n` +
+                      `ได้รับ **${coins.toLocaleString()} Coins**\n\n` +
+                      `ตรวจสอบโดย: **${interaction.user.username}**\n` +
+                      `เวลา: <t:${Math.floor(
+                        Date.now() / 1000
+                      )}:F>`
+                    )
+                ]
+              }
+            );
+          }
+
+          return interaction.update({
             content:
-              '✅ ลบรางวัลแล้ว และโอกาสออกถูกคำนวณใหม่อัตโนมัติ',
-            ephemeral: true
+              `✅ อนุมัติการเติมเงิน ${coins.toLocaleString()} Coins แล้ว\n` +
+              `ตรวจสอบโดย ${interaction.user}`,
+            components: []
+          });
+        }
+
+        // REJECT TOPUP
+
+        if (
+          interaction.customId.startsWith(
+            "reject_topup:"
+          )
+        ) {
+
+          if (!isAdmin(interaction)) {
+
+            return interaction.reply({
+              content:
+                "❌ เฉพาะแอดมิน",
+              ephemeral: true
+            });
+          }
+
+          const userId =
+            interaction.customId.split(
+              ":"
+            )[1];
+
+          const user =
+            getUser(userId);
+
+          user.pendingTopup = null;
+
+          saveDB();
+
+          const discordUser =
+            await client.users
+              .fetch(userId)
+              .catch(() => null);
+
+          if (discordUser) {
+
+            await sendDM(
+              discordUser,
+              {
+                content:
+                  "❌ สลิปการเติมเงินของคุณถูกยกเลิก กรุณาติดต่อแอดมิน"
+              }
+            );
+          }
+
+          return interaction.update({
+            content:
+              `❌ ยกเลิกรายการโดย ${interaction.user}`,
+            components: []
           });
         }
       }
 
+      // ======================================================
+      // SELECT MENU
+      // ======================================================
+
       if (
-        i.isModalSubmit()
+        interaction.isStringSelectMenu()
       ) {
 
-        if (
-          i.customId ===
-          'pay_setup1'
-        ) {
-          config.payment.title =
-            i.fields.getTextInputValue(
-              'title'
-            ) ||
-            config.payment.title;
-
-          config.payment.description =
-            i.fields.getTextInputValue(
-              'desc'
-            );
-
-          config.payment.topupChannelId =
-            cleanId(
-              i.fields.getTextInputValue(
-                'topup'
-              )
-            );
-
-          config.payment.slipChannelId =
-            cleanId(
-              i.fields.getTextInputValue(
-                'slip'
-              )
-            );
-
-          config.payment.reviewChannelId =
-            cleanId(
-              i.fields.getTextInputValue(
-                'review'
-              )
-            );
-
-          save(
-            'config',
-            config
-          );
-
-          return showPaymentSetup2(
-            i
-          );
-        }
+        // PAYMENT METHOD
 
         if (
-          i.customId ===
-          'pay_setup2'
+          interaction.customId ===
+          "topup_method"
         ) {
-          config.payment.banner =
-            i.fields.getTextInputValue(
-              'banner'
-            );
 
-          const tm =
-            i.fields
-              .getTextInputValue(
-                'tm'
-              )
-              .split('|')
-              .map(
-                x =>
-                  x.trim()
-              );
-
-          const bk =
-            i.fields
-              .getTextInputValue(
-                'bank'
-              )
-              .split('|')
-              .map(
-                x =>
-                  x.trim()
-              );
-
-          const qr =
-            i.fields
-              .getTextInputValue(
-                'qr'
-              )
-              .trim();
-
-          const en =
-            i.fields
-              .getTextInputValue(
-                'enabled'
-              )
-              .toUpperCase()
-              .split(',')
-              .map(
-                x =>
-                  x.trim()
-              );
-
-          if (
-            tm.length >= 2
-          ) {
-            config.payment.methods.truemoney = {
-              enabled:
-                en.includes(
-                  'TM'
-                ),
-              accountName:
-                tm[0],
-              accountNumber:
-                tm[1]
-            };
-          }
-
-          if (
-            bk.length >= 3
-          ) {
-            config.payment.methods.bank = {
-              enabled:
-                en.includes(
-                  'BANK'
-                ),
-              bankName:
-                bk[0],
-              accountName:
-                bk[1],
-              accountNumber:
-                bk[2]
-            };
-          }
-
-          if (qr) {
-            config.payment.methods.qr = {
-              enabled:
-                en.includes(
-                  'QR'
-                ),
-              imageUrl:
-                qr
-            };
-          }
-
-          save(
-            'config',
-            config
-          );
-
-          const ch =
-            await i.guild.channels
-              .fetch(
-                config.payment.topupChannelId
-              )
-              .catch(
-                () => null
-              );
-
-          if (
-            ch &&
-            ch.isTextBased()
-          ) {
-            await ch.send(
-              paymentPanel()
-            ).catch(
-              () => {}
-            );
-          }
-
-          return i.reply({
-            content:
-              '✅ ตั้งค่าระบบเติมเงินและสร้างหน้าต่างเติมเงินแล้ว',
-            ephemeral: true
-          });
-        }
-
-        if (
-          i.customId ===
-          'custom_amount'
-        ) {
-          const coins =
+          const index =
             Number(
-              i.fields.getTextInputValue(
-                'coins'
-              )
+              interaction.values[0]
             );
 
-          if (
-            !Number.isInteger(
-              coins
-            ) ||
-            coins < 2
-          ) {
-            return i.reply({
+          const method =
+            db.payment.methods[
+              index
+            ];
+
+          if (!method) {
+
+            return interaction.reply({
               content:
-                '❌ จำนวน Coins ต้องเป็นจำนวนเต็ม และต้องมีมูลค่าอย่างน้อย 1 บาท (ขั้นต่ำ 2 Coins)',
+                "❌ ไม่พบช่องทางชำระเงิน",
               ephemeral: true
             });
           }
 
-          const amount =
-            coins * COIN_RATE;
-
-          return i.reply({
-            ephemeral: true,
-            embeds: [
-              new EmbedBuilder()
-                .setColor(
-                  0x57F287
-                )
-                .setTitle(
-                  '💳 แจ้งยอดเติมเงิน'
-                )
-                .setDescription(
-                  `จำนวน Coins : **${coins.toLocaleString()} Coins**
-ยอดชำระ : **${money(amount)} บาท**
-
-เมื่อชำระเงินแล้ว แนบสลิปที่ <#${config.payment.slipChannelId}>`
-                )
-            ]
-          });
-        }
-
-        if (
-          i.customId ===
-          'store_add'
-        ) {
-          const name =
-            i.fields.getTextInputValue(
-              'name'
-            );
-
-          const desc =
-            i.fields.getTextInputValue(
-              'desc'
-            );
-
-          const type =
-            i.fields.getTextInputValue(
-              'type'
-            ).toUpperCase();
-
-          const price =
-            Number(
-              i.fields.getTextInputValue(
-                'price'
-              )
-            );
-
-          const stock =
-            Number(
-              i.fields.getTextInputValue(
-                'stock'
-              )
-            );
-
-          if (
-            !['ROLE', 'ITEM'].includes(
-              type
-            ) ||
-            !Number.isFinite(
-              price
-            ) ||
-            price < 0 ||
-            !Number.isInteger(
-              stock
-            ) ||
-            stock === 0
-          ) {
-            return i.reply({
-              content:
-                '❌ ข้อมูลไม่ถูกต้อง',
-              ephemeral: true
-            });
-          }
-
-          const id =
-            Date.now().toString();
-
-          store.products[id] = {
-            id,
-            name,
-            description: desc,
-            type,
-            price,
-            stock,
-            roleId:
-              type === 'ROLE'
-                ? (
-                    roleByName(
-                      i.guild,
-                      name
-                    )?.id || ''
-                  )
-                : ''
-          };
-
-          save(
-            'store',
-            store
-          );
-
-          await refreshStore(
-            i.guild
-          );
-
-          return i.reply({
-            content:
-              `✅ เพิ่มสินค้า **${name}** และอัปเดตหน้าร้านอัตโนมัติแล้ว`,
-            ephemeral: true
-          });
-        }
-
-        if (
-          i.customId ===
-          'gift_setup'
-        ) {
-          config.store.giftButton =
-            i.fields.getTextInputValue(
-              'name'
-            );
-
-          save(
-            'config',
-            config
-          );
-
-          await refreshStore(
-            i.guild
-          );
-
-          return i.reply({
-            content:
-              '✅ ตั้งค่าปุ่มแลกรางวัลและอัปเดตหน้าร้านแล้ว',
-            ephemeral: true
-          });
-        }
-
-        if (
-          i.customId ===
-          'gacha_setup1'
-        ) {
-          gacha.name =
-            i.fields.getTextInputValue(
-              'name'
-            ) ||
-            gacha.name;
-
-          gacha.description =
-            i.fields.getTextInputValue(
-              'desc'
-            );
-
-          gacha.channelId =
-            cleanId(
-              i.fields.getTextInputValue(
-                'channel'
-              )
-            );
-
-          gacha.banner =
-            i.fields.getTextInputValue(
-              'banner'
-            );
-
-          gacha.loadingBanner =
-            i.fields.getTextInputValue(
-              'loading'
-            );
-
-          save(
-            'gacha',
-            gacha
-          );
-
-          return showGachaSetup2(
-            i
-          );
-        }
-
-        if (
-          i.customId ===
-          'gacha_setup2'
-        ) {
-          gacha.ticketEmoji =
-            i.fields.getTextInputValue(
-              'ticket_emoji'
-            );
-
-          gacha.ticketName =
-            i.fields.getTextInputValue(
-              'ticket_name'
-            );
-
-          gacha.spinButton =
-            i.fields.getTextInputValue(
-              'spin'
-            );
-
-          save(
-            'gacha',
-            gacha
-          );
-
-          await ensureTicketProduct(
-            i.guild
-          );
-
-          return i.reply({
-            content:
-              `✅ ตั้งค่าตู้กาชาครบ 8 ช่องแล้ว
-🎟️ ระบบสร้าง/อัปเดตสินค้า **${gacha.ticketEmoji} ${gacha.ticketName}** ราคา **5 Coins** ในร้านให้อัตโนมัติแล้ว`,
-            ephemeral: true
-          });
-        }
-
-        if (
-          i.customId.startsWith(
-            'qty:'
-          )
-        ) {
-          const id =
-            i.customId.slice(4);
-
-          const p =
-            store.products[id];
-
-          const qty =
-            Number(
-              i.fields.getTextInputValue(
-                'qty'
-              )
-            );
-
-          if (
-            !p ||
-            !Number.isInteger(
-              qty
-            ) ||
-            qty < 1
-          ) {
-            return i.reply({
-              content:
-                '❌ จำนวนไม่ถูกต้อง',
-              ephemeral: true
-            });
-          }
-
-          if (
-            p.stock !== -1 &&
-            p.stock < qty
-          ) {
-            return i.reply({
-              content:
-                `❌ สินค้าเหลือ ${p.stock}`,
-              ephemeral: true
-            });
-          }
-
-          const e =
+          const embed =
             new EmbedBuilder()
               .setTitle(
-                '🛒 ยืนยันคำสั่งซื้อ'
+                `💳 ${method.type}`
               )
               .setDescription(
-                `ชื่อสินค้า : ${p.name}
-ราคา : ${p.price * qty} Coins
-จำนวน : ${qty}
-ประเภทสินค้า : ${p.type}`
+                method.details || ""
+              )
+              .setColor(
+                0x2ecc71
               );
 
-          return i.reply({
-            ephemeral: true,
-            embeds: [e],
+          if (
+            validImage(method.qr)
+          ) {
+
+            embed.setImage(
+              method.qr
+            );
+          }
+
+          return interaction.reply({
+            embeds: [embed],
             components: [
-              new ActionRowBuilder()
-                .addComponents(
+              amountMenu(),
+
+              new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                  .setCustomId(
+                    "custom_topup_button"
+                  )
+                  .setLabel(
+                    "กำหนดเอง"
+                  )
+                  .setStyle(
+                    ButtonStyle.Primary
+                  )
+              )
+            ],
+            ephemeral: true
+          });
+        }
+
+        // TOPUP AMOUNT
+
+        if (
+          interaction.customId ===
+          "topup_amount"
+        ) {
+
+          const coins =
+            Number(
+              interaction.values[0]
+            );
+
+          const baht =
+            getTopupPrice(
+              coins
+            );
+
+          getUser(
+            interaction.user.id
+          ).pendingTopup = {
+            coins,
+            baht
+          };
+
+          saveDB();
+
+          return interaction.reply({
+            content:
+              `💰 คุณเลือกเติม **${coins.toLocaleString()} Coins**\n` +
+              `💵 ราคา **${money(baht)} บาท**\n\n` +
+              `เมื่อชำระเงินแล้ว กรุณาแนบสลิปใน <#${db.payment.slipChannelId}>`,
+            ephemeral: true
+          });
+        }
+
+        // STORE BUY
+
+        if (
+          interaction.customId ===
+          "store_buy"
+        ) {
+
+          const item =
+            db.items.find(
+              x =>
+                x.id ===
+                interaction.values[0]
+            );
+
+          if (!item) {
+
+            return interaction.reply({
+              content:
+                "❌ ไม่พบสินค้า",
+              ephemeral: true
+            });
+          }
+
+          if (
+            item.type ===
+            "ROLE"
+          ) {
+
+            return interaction.reply({
+              content:
+                "🧾 **รายละเอียดคำสั่งซื้อ**\n\n" +
+                `ชื่อสินค้า: **${item.name}**\n` +
+                `ราคา: **${item.price} Coins**\n` +
+                `จำนวน: **1**`,
+              components: [
+                new ActionRowBuilder().addComponents(
+
                   new ButtonBuilder()
                     .setCustomId(
-                      `buyok:${id}:${qty}`
+                      `confirm_buy:${item.id}:1`
                     )
                     .setLabel(
-                      'ยืนยันคำสั่งซื้อ'
+                      "ยืนยันคำสั่งซื้อ"
                     )
                     .setStyle(
                       ButtonStyle.Success
@@ -2524,547 +2632,776 @@ client.on(
 
                   new ButtonBuilder()
                     .setCustomId(
-                      'buycancel'
+                      "cancel_buy"
                     )
                     .setLabel(
-                      'ยกเลิกคำสั่งซื้อ'
+                      "ยกเลิกคำสั่งซื้อ"
                     )
                     .setStyle(
                       ButtonStyle.Danger
                     )
+
                 )
-            ]
-          });
-        }
-
-        if (
-          i.customId ===
-          'gadd_modal'
-        ) {
-          const name =
-            i.fields.getTextInputValue(
-              'name'
-            );
-
-          const qty =
-            Number(
-              i.fields.getTextInputValue(
-                'qty'
-              )
-            );
-
-          const chance =
-            Number(
-              i.fields.getTextInputValue(
-                'chance'
-              )
-            );
-
-          const type =
-            i.fields.getTextInputValue(
-              'type'
-            ).toUpperCase();
-
-          if (
-            !['ROLE', 'ITEM'].includes(
-              type
-            ) ||
-            !Number.isInteger(
-              qty
-            ) ||
-            qty === 0 ||
-            !Number.isFinite(
-              chance
-            ) ||
-            chance <= 0
-          ) {
-            return i.reply({
-              content:
-                '❌ ข้อมูลรางวัลกาชาไม่ถูกต้อง',
+              ],
               ephemeral: true
             });
           }
 
-          gacha.rewards.push({
-            id:
-              Date.now().toString(),
-            name,
-            quantity:
-              qty,
-            unlimited:
-              qty === -1
-                ? 1
-                : 0,
-            chance,
-            type
+          return interaction.showModal(
+            makeModal(
+              `buy_quantity:${item.id}`,
+              "จำนวนสินค้า",
+              [
+                makeField(
+                  "quantity",
+                  "จำนวน",
+                  TextInputStyle.Short,
+                  true,
+                  "เช่น 1"
+                )
+              ]
+            )
+          );
+        }
+
+        // GACHA COUNT
+
+        if (
+          interaction.customId ===
+          "gacha_count"
+        ) {
+
+          const amount =
+            Number(
+              interaction.values[0]
+            );
+
+          const user =
+            getUser(
+              interaction.user.id
+            );
+
+          const tickets =
+            user.inventory[
+              db.gacha.ticketName
+            ] || 0;
+
+          if (
+            tickets < amount
+          ) {
+
+            return interaction.reply({
+              content:
+                `❌ คุณมีตั๋วไม่พอ\nมี ${tickets} แต่ต้องใช้ ${amount}`,
+              ephemeral: true
+            });
+          }
+
+          if (
+            !db.gachaRewards.length
+          ) {
+
+            return interaction.reply({
+              content:
+                "❌ ตู้กาชายังไม่มีรางวัล",
+              ephemeral: true
+            });
+          }
+
+          user.inventory[
+            db.gacha.ticketName
+          ] -= amount;
+
+          if (
+            user.inventory[
+              db.gacha.ticketName
+            ] <= 0
+          ) {
+
+            delete user.inventory[
+              db.gacha.ticketName
+            ];
+          }
+
+          saveDB();
+
+          await interaction.reply({
+            content:
+              "🎰 **LOADING...**\n\n" +
+              "กำลังสุ่มรางวัล...\n" +
+              "กรุณารอประมาณ 5 วินาที",
+            ephemeral: true
           });
 
-          save(
-            'gacha',
-            gacha
+          setTimeout(
+            async () => {
+
+              try {
+
+                const results = [];
+
+                for (
+                  let count = 0;
+                  count < amount;
+                  count++
+                ) {
+
+                  const available =
+                    db.gachaRewards.filter(
+                      reward =>
+                        reward.stock !== 0
+                    );
+
+                  if (
+                    !available.length
+                  ) {
+                    break;
+                  }
+
+                  const totalWeight =
+                    available.reduce(
+                      (
+                        sum,
+                        reward
+                      ) =>
+                        sum +
+                        Number(
+                          reward.weight
+                        ),
+                      0
+                    );
+
+                  let random =
+                    Math.random() *
+                    totalWeight;
+
+                  let selected =
+                    available[
+                      available.length - 1
+                    ];
+
+                  for (
+                    const reward of available
+                  ) {
+
+                    random -=
+                      Number(
+                        reward.weight
+                      );
+
+                    if (
+                      random <= 0
+                    ) {
+
+                      selected =
+                        reward;
+
+                      break;
+                    }
+                  }
+
+                  if (
+                    selected.stock > 0
+                  ) {
+
+                    selected.stock--;
+                  }
+
+                  results.push(
+                    selected
+                  );
+
+                  if (
+                    selected.type ===
+                    "ROLE"
+                  ) {
+
+                    const role =
+                      interaction.guild.roles.cache.get(
+                        selected.roleId
+                      );
+
+                    if (role) {
+
+                      await interaction.member.roles
+                        .add(role)
+                        .catch(() => {});
+                    }
+
+                  } else {
+
+                    const rewardName =
+                      selected.name
+                        .toLowerCase();
+
+                    if (
+                      rewardName ===
+                      "coins"
+                    ) {
+
+                      user.coins +=
+                        selected.amount;
+
+                    } else if (
+                      rewardName ===
+                      "เกลือ"
+                    ) {
+
+                      user.salt +=
+                        selected.amount;
+
+                    } else {
+
+                      addItem(
+                        interaction.user.id,
+                        selected.name,
+                        selected.amount
+                      );
+                    }
+                  }
+                }
+
+                saveDB();
+
+                const resultText =
+                  results
+                    .map(
+                      reward =>
+                        `🎁 **${reward.name}** ×${reward.amount}`
+                    )
+                    .join("\n") ||
+                  "ไม่มีรางวัล";
+
+                await interaction.editReply({
+                  content:
+                    `🎉 **สุ่มสำเร็จ ${amount} ครั้ง**\n\n` +
+                    resultText
+                });
+
+                await refreshGacha(
+                  interaction.guild
+                );
+
+              } catch (error) {
+
+                console.error(
+                  "Gacha Error:",
+                  error
+                );
+              }
+
+            },
+            5000
           );
 
-          await updateGachaMessage(
-            i.guild
+          return;
+        }
+
+        // GIFT SELECT
+
+        if (
+          interaction.customId ===
+          "gift_select"
+        ) {
+
+          const gift =
+            db.gifts.find(
+              x =>
+                x.id ===
+                interaction.values[0]
+            );
+
+          if (!gift) {
+
+            return interaction.reply({
+              content:
+                "❌ ไม่พบรางวัล",
+              ephemeral: true
+            });
+          }
+
+          const user =
+            getUser(
+              interaction.user.id
+            );
+
+          if (
+            user.salt <
+            gift.costSalt
+          ) {
+
+            return interaction.reply({
+              content:
+                `❌ เกลือไม่พอ\nคุณมี ${user.salt} เกลือ`,
+              ephemeral: true
+            });
+          }
+
+          user.salt -=
+            gift.costSalt;
+
+          if (
+            gift.stock > 0
+          ) {
+
+            gift.stock--;
+          }
+
+          if (
+            gift.type ===
+            "ROLE"
+          ) {
+
+            const role =
+              interaction.guild.roles.cache.get(
+                gift.roleId
+              );
+
+            if (role) {
+
+              await interaction.member.roles
+                .add(role)
+                .catch(() => {});
+            }
+
+          } else {
+
+            addItem(
+              interaction.user.id,
+              gift.name,
+              1
+            );
+          }
+
+          saveDB();
+
+          await refreshStore(
+            interaction.guild
           );
 
-          return i.reply({
+          return interaction.reply({
             content:
-              `✅ เพิ่มรางวัล **${name}** แล้ว และโอกาสจะแสดงเป็นเปอร์เซ็นต์อัตโนมัติ`,
+              `🎁 แลกรางวัล **${gift.name}** สำเร็จ`,
             ephemeral: true
           });
         }
       }
 
-    } catch (e) {
+    } catch (error) {
+
       console.error(
-        'interactionCreate',
-        e
+        "❌ Interaction Error:",
+        error
       );
 
       if (
-        !i.replied &&
-        !i.deferred
+        !interaction.replied &&
+        !interaction.deferred
       ) {
-        await i.reply({
-          content:
-            '❌ เกิดข้อผิดพลาด กรุณาตรวจสอบ Railway Logs',
-          ephemeral: true
-        }).catch(
-          () => {}
-        );
+
+        try {
+
+          await interaction.reply({
+            content:
+              "❌ ระบบเกิดข้อผิดพลาด กรุณาลองใหม่",
+            ephemeral: true
+          });
+
+        } catch {}
       }
     }
   }
 );
 
-async function ensureTicketProduct(
-  guild
-) {
-  const existing =
-    Object.values(
-      store.products
-    ).find(
-      p =>
-        p.gachaTicket === true
-    );
-
-  if (existing) {
-    existing.name =
-      gacha.ticketName;
-
-    existing.description =
-      `${gacha.ticketEmoji} ตั๋วสำหรับสุ่ม ${gacha.name}`;
-
-    existing.price = 5;
-    existing.type = 'ITEM';
-    existing.stock = -1;
-
-  } else {
-
-    const id =
-      `gacha_ticket_${Date.now()}`;
-
-    store.products[id] = {
-      id,
-      name:
-        gacha.ticketName,
-      description:
-        `${gacha.ticketEmoji} ตั๋วสำหรับสุ่ม ${gacha.name}`,
-      type:
-        'ITEM',
-      price:
-        5,
-      stock:
-        -1,
-      roleId:
-        '',
-      gachaTicket:
-        true
-    };
-  }
-
-  save(
-    'store',
-    store
-  );
-
-  await refreshStore(
-    guild
-  );
-}
+// ============================================================
+// MESSAGE COMMANDS
+// ============================================================
 
 client.on(
-  'messageCreate',
-  async m => {
-    if (m.author.bot) return;
+  "messageCreate",
+  async message => {
 
     try {
-      const text =
-        m.content.trim();
 
       if (
-        text ===
-        '!setup'
+        message.author.bot ||
+        !message.guild
       ) {
-        if (
-          !m.member?.permissions.has(
-            PermissionFlagsBits.Administrator
-          )
-        ) {
-          return m.reply(
-            '❌ เฉพาะ Administrator'
-          );
-        }
-
-        const e =
-          new EmbedBuilder()
-            .setColor(
-              0x5865F2
-            )
-            .setTitle(
-              '🛠️ LUCENT BOT — คำสั่งทั้งหมด'
-            )
-            .setDescription(
-              `**ระบบเติมเงิน**
-
-\`/pymentsetting\`
-— ตั้งค่าบัญชีและห้องเติมเงิน
-
-\`/startstore\`
-— สร้างหน้าระบบเติมเงิน
-
-**ระบบร้านค้า**
-
-\`/storeadd\`
-— เพิ่ม ROLE/ITEM และอัปเดตหน้าร้านทันที
-
-\`/gift\`
-— ตั้งชื่อปุ่มแลกรางวัล
-
-**ระบบกาชา**
-
-\`/gachasetup\`
-— ตั้งค่าตู้ครบ 8 ช่อง
-
-\`/gachastart\`
-— สร้างตู้กาชา
-
-\`/gachareward\`
-— เพิ่ม/ลบรางวัล
-
-**สมาชิก**
-
-\`!bagpack\`
-— ดู Coins/เกลือ/ตั๋ว/ไอเท็ม
-
-\`/balance\`
-— ดู Coins
-
-\`!addgift\`
-— เพิ่มของแลกด้วยเกลือ
-
-🎟️ ตั้งค่าตู้กาชาแล้วตั๋วจะถูกเพิ่มในร้านอัตโนมัติ ราคา 5 Coins`
-            );
-
-        return m.reply({
-          embeds: [e]
-        });
+        return;
       }
 
-      if (
-        text ===
-        '!bagpack'
-      ) {
-        const u =
-          user(m.author.id);
+      // ======================================================
+      // BAGPACK
+      // ======================================================
 
-        const items =
+      if (
+        message.content.trim() ===
+          "!bagpack" ||
+        message.content.trim() ===
+          "!backpack"
+      ) {
+
+        const user =
+          getUser(
+            message.author.id
+          );
+
+        const inventory =
           Object.entries(
-            u.inventory
+            user.inventory
           )
             .filter(
-              ([, v]) =>
-                v > 0
+              ([, amount]) =>
+                amount > 0
             )
             .map(
-              ([k, v]) =>
-                `• ${k} × ${v}`
+              ([name, amount]) =>
+                `• **${name}** ×${amount}`
             )
-            .join('\n') ||
-          'ไม่มี ITEM';
+            .join("\n") ||
+          "ไม่มีไอเท็ม";
 
-        return m.reply({
+        return message.channel.send({
           embeds: [
             new EmbedBuilder()
-              .setColor(
-                0x57F287
-              )
               .setTitle(
                 `🎒 กระเป๋าของ ${
-                  m.member?.displayName ||
-                  m.author.username
+                  message.member?.displayName ||
+                  message.author.username
                 }`
               )
-              .setDescription(
-                `🪙 Coins: **${u.coins}**
-🧂 เกลือ: **${u.salt}**
-🎟️ ตั๋วกาชา: **${u.tickets}**
-
-**ITEM**
-${items}`
+              .setColor(
+                0xf1c40f
+              )
+              .addFields(
+                {
+                  name: "🪙 Coins",
+                  value:
+                    `${user.coins.toLocaleString()} Coins`
+                },
+                {
+                  name: "🧂 เกลือ",
+                  value:
+                    `${user.salt.toLocaleString()}`
+                },
+                {
+                  name: "📦 ไอเท็ม",
+                  value:
+                    inventory
+                }
               )
           ]
         });
       }
 
+      // ======================================================
+      // SETUP
+      // ======================================================
+
       if (
-        text.startsWith(
-          '!addgift'
+        message.content.trim() ===
+        "!setup"
+      ) {
+
+        return message.channel.send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle(
+                "🛠️ LUCENT COMMANDS"
+              )
+              .setColor(
+                0x5865f2
+              )
+              .setDescription(
+                "รายการคำสั่งทั้งหมด"
+              )
+              .addFields(
+
+                {
+                  name:
+                    "💳 ระบบเติมเงิน",
+                  value:
+                    "`/pymentsetting` ตั้งค่าระบบเติมเงิน\n" +
+                    "`/startstore` สร้างหน้าต่างเติมเงิน\n" +
+                    "`/balance` ดู Coins"
+                },
+
+                {
+                  name:
+                    "🛒 ระบบร้านค้า",
+                  value:
+                    "`/store_setup` ตั้งค่าร้านค้า\n" +
+                    "`/storeadd` เพิ่มสินค้า\n" +
+                    "`/gift` ตั้งค่าปุ่มแลกรางวัล"
+                },
+
+                {
+                  name:
+                    "🎰 ระบบกาชา",
+                  value:
+                    "`/gachasetup` ตั้งค่าตู้กาชา\n" +
+                    "`/gachastart` สร้างตู้กาชา"
+                },
+
+                {
+                  name:
+                    "🎒 ระบบกระเป๋า",
+                  value:
+                    "`!bagpack` ดู Coins / เกลือ / ไอเท็ม"
+                },
+
+                {
+                  name:
+                    "🎁 ระบบแลกรางวัล",
+                  value:
+                    "`!addgift` เพิ่มรางวัลที่ใช้เกลือแลก"
+                }
+
+              )
+          ]
+        });
+      }
+
+      // ======================================================
+      // ADD GIFT
+      // ======================================================
+
+      if (
+        message.content.trim() ===
+          "!addgift" &&
+        message.member.permissions.has(
+          PermissionFlagsBits.Administrator
         )
       ) {
-        if (
-          !m.member?.permissions.has(
-            PermissionFlagsBits.Administrator
-          )
-        ) {
-          return m.reply(
-            '❌ เฉพาะ Administrator'
-          );
-        }
 
-        const parts =
-          text.split(
-            /\s+/
-          );
-
-        if (
-          parts.length < 5
-        ) {
-          return m.reply(
-            'รูปแบบ: `!addgift ชื่อรางวัล ราคาเกลือ จำนวน ROLE|ITEM`'
-          );
-        }
-
-        const type =
-          parts
-            .pop()
-            .toUpperCase();
-
-        const stock =
-          Number(
-            parts.pop()
-          );
-
-        const cost =
-          Number(
-            parts.pop()
-          );
-
-        const name =
-          parts
-            .slice(1)
-            .join(' ');
-
-        if (
-          !['ROLE', 'ITEM'].includes(
-            type
-          ) ||
-          !Number.isFinite(
-            cost
-          ) ||
-          cost < 0 ||
-          !Number.isInteger(
-            stock
-          ) ||
-          stock === 0
-        ) {
-          return m.reply(
-            '❌ ข้อมูลไม่ถูกต้อง'
-          );
-        }
-
-        const id =
-          Date.now().toString();
-
-        gifts.items[id] = {
-          id,
-          name,
-          cost,
-          stock,
-          type
-        };
-
-        save(
-          'gifts',
-          gifts
-        );
-
-        await refreshStore(
-          m.guild
-        );
-
-        return m.reply(
-          `✅ เพิ่มรางวัลแลก **${name}** และอัปเดตหน้าร้านแล้ว`
-        );
+        return message.reply({
+          content:
+            "🎁 **ระบบเพิ่มรางวัลแลกด้วยเกลือ**",
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId(
+                  "gift_admin_add"
+                )
+                .setLabel(
+                  "➕ เพิ่มรางวัล"
+                )
+                .setStyle(
+                  ButtonStyle.Success
+                )
+            )
+          ]
+        });
       }
+
+      // ======================================================
+      // ADD GIFT BUTTON
+      // ======================================================
 
       if (
-        config.payment.slipChannelId &&
-        m.channel.id ===
-          config.payment.slipChannelId &&
-        m.attachments.size
+        message.content.trim() ===
+          "!addgift"
       ) {
-        const img =
-          m.attachments.find(
-            a =>
-              a.contentType?.startsWith(
-                'image/'
-              ) ||
-              /\.(png|jpe?g|webp)$/i.test(
-                a.name || ''
-              )
-          );
 
-        if (!img) return;
-
-        const ask =
-          await m.author
-            .send(
-              `📸 รับสลิปแล้ว
-
-กรุณาตอบ DM นี้ด้วยจำนวนเงินที่โอน (บาท)
-เช่น 50`
-            )
-            .catch(
-              () => null
-            );
-
-        if (!ask) {
-          return m.reply(
-            '⚠️ ไม่สามารถส่ง DM ได้'
-          );
-        }
-
-        const filter =
-          x =>
-            x.author.id ===
-              m.author.id &&
-            /^\d+(\.\d+)?$/.test(
-              x.content.trim()
-            );
-
-        const col =
-          ask.channel
-            .createMessageCollector({
-              filter,
-              time:
-                120000,
-              max:
-                1
-            });
-
-        col.on(
-          'collect',
-          async x => {
-            const amount =
-              Number(
-                x.content
-              );
-
-            const coins =
-              Math.floor(
-                amount /
-                  COIN_RATE
-              );
-
-            const reviewId =
-              config.payment
-                .reviewChannelId ||
-              config.payment
-                .slipChannelId;
-
-            const e =
-              new EmbedBuilder()
-                .setColor(
-                  0xFEE75C
-                )
-                .setTitle(
-                  '💰 ตรวจสอบสลิปเติมเงิน'
-                )
-                .setDescription(
-                  `ผู้ใช้: <@${m.author.id}>
-จำนวน: **${money(amount)} บาท**
-Coins ที่จะได้รับ: **${coins} Coins**`
-                )
-                .setImage(
-                  img.url
-                );
-
-            const ch =
-              await m.guild.channels
-                .fetch(
-                  reviewId
-                )
-                .catch(
-                  () => null
-                );
-
-            if (
-              ch &&
-              ch.isTextBased()
-            ) {
-              await ch.send({
-                embeds: [e],
-
-                components: [
-                  new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder()
-                        .setCustomId(
-                          `approve:${m.author.id}:${coins}:${amount}`
-                        )
-                        .setLabel(
-                          'ชำระเงิน'
-                        )
-                        .setStyle(
-                          ButtonStyle.Success
-                        ),
-
-                      new ButtonBuilder()
-                        .setCustomId(
-                          `reject:${m.author.id}:${coins}:${amount}`
-                        )
-                        .setLabel(
-                          'ยกเลิก'
-                        )
-                        .setStyle(
-                          ButtonStyle.Danger
-                        )
-                    )
-                ]
-              });
-            }
-          }
-        );
+        return;
       }
 
-    } catch (e) {
+      // ======================================================
+      // SLIP
+      // ======================================================
+
+      if (
+        db.payment.slipChannelId &&
+        message.channel.id ===
+          db.payment.slipChannelId &&
+        message.attachments.size
+      ) {
+
+        const user =
+          getUser(
+            message.author.id
+          );
+
+        if (
+          !user.pendingTopup
+        ) {
+          return;
+        }
+
+        const reviewChannel =
+          getChannel(
+            message.guild,
+            db.payment.reviewChannelId ||
+              db.payment.slipChannelId
+          );
+
+        if (!reviewChannel) {
+          return;
+        }
+
+        const attachment =
+          message.attachments.first();
+
+        const embed =
+          new EmbedBuilder()
+            .setTitle(
+              "💰 ตรวจสอบการเติมเงิน"
+            )
+            .setColor(
+              0xf1c40f
+            )
+            .addFields(
+              {
+                name:
+                  "👤 ผู้ใช้",
+                value:
+                  `${message.author} (${message.author.id})`
+              },
+              {
+                name:
+                  "🪙 Coins",
+                value:
+                  `${user.pendingTopup.coins}`
+              },
+              {
+                name:
+                  "💵 ยอดชำระ",
+                value:
+                  `${money(
+                    user.pendingTopup.baht
+                  )} บาท`
+              }
+            )
+            .setImage(
+              attachment.url
+            );
+
+        await reviewChannel.send({
+          embeds: [embed],
+          components: [
+            new ActionRowBuilder().addComponents(
+
+              new ButtonBuilder()
+                .setCustomId(
+                  `approve_topup:${message.author.id}:${user.pendingTopup.coins}:${user.pendingTopup.baht}`
+                )
+                .setLabel(
+                  "ชำระเงิน"
+                )
+                .setStyle(
+                  ButtonStyle.Success
+                ),
+
+              new ButtonBuilder()
+                .setCustomId(
+                  `reject_topup:${message.author.id}`
+                )
+                .setLabel(
+                  "ยกเลิก"
+                )
+                .setStyle(
+                  ButtonStyle.Danger
+                )
+
+            )
+          ]
+        });
+
+        await message.reply({
+          content:
+            "✅ รับสลิปแล้ว กรุณารอแอดมินตรวจสอบ",
+          allowedMentions: {
+            repliedUser: false
+          }
+        });
+      }
+
+    } catch (error) {
+
       console.error(
-        'messageCreate',
-        e
+        "❌ Message Error:",
+        error
       );
     }
   }
 );
 
-client.login(
-  TOKEN
-).catch(e => {
-  console.error(
-    'Login failed:',
-    e
-  );
+// ============================================================
+// GIFT ADMIN BUTTON
+// ============================================================
 
-  process.exit(1);
-});
+client.on(
+  "interactionCreate",
+  async interaction => {
+
+    if (
+      !interaction.isButton()
+    ) {
+      return;
+    }
+
+    if (
+      interaction.customId ===
+      "gift_admin_add"
+    ) {
+
+      if (
+        !isAdmin(interaction)
+      ) {
+
+        return interaction.reply({
+          content:
+            "❌ เฉพาะแอดมิน",
+          ephemeral: true
+        });
+      }
+
+      return interaction.showModal(
+        makeModal(
+          "gift_add",
+          "เพิ่มรางวัลแลกด้วยเกลือ",
+          [
+            makeField(
+              "name",
+              "ชื่อรางวัล"
+            ),
+            makeField(
+              "costSalt",
+              "จำนวนเกลือที่ใช้แลก"
+            ),
+            makeField(
+              "stock",
+              "จำนวน (-1 = ไม่จำกัด)"
+            ),
+            makeField(
+              "type",
+              "ประเภท ROLE หรือ ITEM"
+            )
+          ]
+        )
+      );
+    }
+  }
+);
+
+// ============================================================
+// LOGIN
+// ============================================================
+
+client.login(TOKEN)
+  .then(() => {
+
+    console.log(
+      "🚀 LUCENT BOT กำลังเริ่มทำงาน..."
+    );
+
+  })
+  .catch(error => {
+
+    console.error(
+      "❌ Discord Login Error:",
+      error
+    );
+
+    process.exit(1);
+  });
