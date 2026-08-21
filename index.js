@@ -20,6 +20,7 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const { installCoinActivity } = require('./coin_activity');
 
 // ============================================================
 // LUCENT BOT - COMPLETE SINGLE-FOLDER VERSION
