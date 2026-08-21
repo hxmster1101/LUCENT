@@ -1040,7 +1040,62 @@ client.on('interactionCreate', async i => {
     if (member) await member.send(`💰 เติมเงินสำเร็จ\nท่านได้ชำระเงินแล้วจำนวน : ${money(p.amount)} บาท\nCoins ที่ได้รับ : ${Number(p.coins).toLocaleString()} Coins\nเมื่อเวลา : ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}\nตรวจสอบโดย : ${i.user.tag}`).catch(() => {});
   } catch (err) { console.error('review error:', err); if (!i.replied) await i.reply({ content: '❌ เกิดข้อผิดพลาด', ephemeral: true }).catch(() => {}); }
 });
+// ===== BALANCE =====
+  if (interaction.commandName === 'balance') {
+    return interaction.reply(
+      `🪙 คุณมี **${getCoins(interaction.user.id).toLocaleString()} Coins**`
+  );
+}
 
+// ===== ADD COINS =====
+  if (interaction.commandName === 'addcoins') {
+
+    if (!isAdmin(interaction)) {
+      return adminOnlyMessage(interaction);
+    }
+
+    const userId = cleanId(interaction.options.getString('user_id'));
+    const amount = interaction.options.getInteger('amount');
+    const reason = interaction.options.getString('reason');
+
+    const member = await interaction.guild.members
+      .fetch(userId)
+      .catch(() => null);
+
+    if (!member) {
+      return interaction.reply({
+        content: '❌ ไม่พบสมาชิกจาก ID ที่กรอก',
+        ephemeral: true
+      });
+    }
+
+    const newBalance = addCoins(userId, amount);
+
+    // DM ผู้ได้รับ Coins
+    const dm = new EmbedBuilder()
+      .setColor(0x57F287)
+      .setTitle('🪙 คุณได้รับ Coins')
+      .setDescription(
+        `คุณได้รับ Coins จำนวน **${amount.toLocaleString()} Coins**\n\n` +
+        `🪙 เหรียญคงเหลือ : **${newBalance.toLocaleString()} Coins**\n` +
+        `👤 ผู้ส่งเหรียญ : **${interaction.user.tag}**\n` +
+        `📝 เหตุผล : **${reason}**`
+      );
+
+    await member.send({ embeds: [dm] }).catch(() => null);
+
+    return interaction.reply({
+      content:
+        `✅ เสก Coins สำเร็จ\n` +
+        `👤 ผู้รับ : ${member}\n` +
+        `🪙 จำนวน : **${amount.toLocaleString()} Coins**\n` +
+        `💰 ยอดคงเหลือ : **${newBalance.toLocaleString()} Coins**\n` +
+        `📝 เหตุผล : ${reason}`,
+      ephemeral: true
+    });
+}
+
+return;
 if (!TOKEN) {
   console.error('❌ ไม่พบ DISCORD_TOKEN/TOKEN ใน Railway Variables');
   process.exit(1);
