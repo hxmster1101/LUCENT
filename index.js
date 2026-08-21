@@ -119,6 +119,17 @@ function getUser(id) {
   if (!users[id]) users[id] = { coins: 0, salt: 0, tickets: 0, inventory: {}, purchases: 0 };
   return users[id];
 }
+
+function getCoins(id) {
+  return getUser(id).coins || 0;
+}
+
+function addCoins(id, amount) {
+  const user = getUser(id);
+  user.coins = Math.max(0, Math.floor(user.coins + Number(amount)));
+  save('users', users);
+  return user.coins;
+}
 function addInventory(id, name, qty = 1) {
   const u = getUser(id);
   u.inventory[name] = (u.inventory[name] || 0) + qty;
