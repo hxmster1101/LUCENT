@@ -411,6 +411,26 @@ function commands() {
     new SlashCommandBuilder().setName('bagpack').setDescription('ดูกระเป๋า'),
     new SlashCommandBuilder().setName('addgift').setDescription('เพิ่มรางวัลแลกด้วยเกลือ').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   ].map(c => c.toJSON());
+    new SlashCommandBuilder()
+    .setName('addcoins')
+    .setDescription('เสก Coins ให้สมาชิก')
+    .addStringOption(o =>
+      o.setName('user_id')
+        .setDescription('ID ของสมาชิกที่จะได้รับ Coins')
+        .setRequired(true)
+    )
+    .addIntegerOption(o =>
+      o.setName('amount')
+        .setDescription('จำนวน Coins ที่ต้องการให้')
+        .setMinValue(1)
+        .setRequired(true)
+    )
+    .addStringOption(o =>
+      o.setName('reason')
+        .setDescription('เหตุผลที่ให้ Coins')
+        .setRequired(true)
+    )
+];
 }
 
 const client = new Client({
